@@ -1,0 +1,23 @@
+---
+# Mnemosyne cloud-init network-config (v2) — example
+# ==================================================
+# Copy to templates/network-config.yml:
+#   cp templates/network-config.example.yml templates/network-config.yml
+#
+# At provisioning time Mnemosyne overwrites `addresses` and `gateway4` of the
+# `vif0` interface from each server's `ip` / `gateway` in the inventory, so the
+# values below are only placeholders. The `match`/`set-name` and `nameservers`
+# parts ARE used as written — adjust DNS to taste.
+version: 2
+ethernets:
+  vif0:
+    match:
+      name: enp1*           # match the first enp1* NIC...
+    set-name: vif0          # ...and rename it to a stable "vif0"
+    addresses:
+      - 192.0.2.50/24       # placeholder — replaced from server `ip`
+    gateway4: 192.0.2.1     # placeholder — replaced from server `gateway`
+    nameservers:
+      addresses:
+        - 8.8.8.8
+        - 1.1.1.1

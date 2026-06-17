@@ -1,0 +1,13 @@
+*.class
+libs
+build
+.DS*
+*.jar
+*dev*
+target
+dependency-reduced-pom.xml
+
+# Local inventories — contain private hosts/keys. Start from configs/servers.example.yml
+configs/servers.yml
+configs/servers_prod.yml
+configs/servers_dev.yml

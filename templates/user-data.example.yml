@@ -1,0 +1,67 @@
+#cloud-config
+# Mnemosyne cloud-init user-data — example
+# ========================================
+# Copy to templates/user-data.yml and put your own SSH public key(s) below:
+#   cp templates/user-data.example.yml templates/user-data.yml
+#
+# `hostname` and `fqdn` are filled in automatically from the server `name` in the
+# inventory, so they are left empty here. Everything else is applied as-is to
+# every VM that uses this template.
+
+hostname:
+fqdn:
+timezone: Asia/Tomsk
+locale: en_US.UTF-8
+
+users:
+  - name: admin
+    gecos: Local User
+    sudo: ALL=(ALL) NOPASSWD:ALL
+    shell: /bin/bash
+    groups: sudo
+    lock_passwd: true
+    ssh_authorized_keys:
+      # Replace with YOUR public key(s). This placeholder will NOT let you log in.
+      - ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAA_REPLACE_WITH_YOUR_PUBLIC_KEY you@example
+
+package_update: true
+package_upgrade: true
+
+packages:
+  - sudo
+  - vim
+  - htop
+  - curl
+  - qemu-guest-agent
+  - bash-completion
+  - rsync
+  - dnsutils
+  - iperf3
+  - ca-certificates
+
+locale_config:
+  locale: en_US.UTF-8
+
+write_files:
+  - path: /etc/sysctl.d/99-custom.conf
+    content: |
+      net.ipv4.conf.all.rp_filter = 1
+      net.ipv4.conf.default.rp_filter = 1
+      net.ipv4.conf.all.accept_redirects = 0
+      net.ipv6.conf.all.accept_redirects = 0
+      fs.file-max = 100000
+      net.core.somaxconn = 1024
+      net.ipv4.tcp_syncookies = 1
+
+  - path: /etc/systemd/journald.conf.d/custom.conf
+    content: |
+      [Journal]
+      SystemMaxUse=200M
+
+
+power_state:
+  delay: now
+  mode: reboot
+  message: Rebooting after cloud-init
+  timeout: 30
+  condition: touch /etc/cloud/cloud-init.disabled

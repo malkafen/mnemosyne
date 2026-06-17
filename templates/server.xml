@@ -1,0 +1,64 @@
+
+<domain type='kvm'>
+  <name></name>
+
+  <metadata>
+    <mnem:mnemosyne xmlns:mnem='https://mnemosyne.dev/schema/v1'>
+      <mnem:managedBy>mnemosyne</mnem:managedBy>
+      <mnem:serverId></mnem:serverId>
+      <mnem:specHash></mnem:specHash>
+      <mnem:specVersion>1</mnem:specVersion>
+    </mnem:mnemosyne>
+  </metadata>
+
+  <memory unit='MiB'></memory>
+  <vcpu></vcpu>
+
+  <os>
+    <type arch='x86_64' machine='pc-q35-7.2'>hvm</type>
+    <smbios mode='sysinfo'/>
+  </os>
+
+  <sysinfo type='smbios'>
+    <system>
+      <entry name='serial'></entry>
+    </system>
+  </sysinfo>
+
+  <devices>
+    <emulator>/usr/bin/qemu-system-x86_64</emulator>
+
+    <!-- Основной диск -->
+    <disk type='file' device='disk'>
+      <driver name='qemu' type='qcow2'/>
+      <source file=''/>
+      <target dev='vda' bus='virtio'/>
+    </disk>
+
+    <!-- Сеть обязательна (cloud-init HTTP) -->
+    <interface type='network'>
+      <source network=''/>
+      <model type='virtio'/>
+    </interface>
+
+    <!-- Последовательная консоль -->
+    <console type='pty'>
+      <target type='serial' port='0'/>
+    </console>
+
+    <!-- virtio-serial контроллер для guest agent -->
+    <controller type='virtio-serial' index='0'/>
+    <!-- QEMU Guest Agent -->
+    <channel type='unix'>
+      <target type='virtio' name='org.qemu.guest_agent.0'/>
+      <address type='virtio-serial' controller='0' bus='0' port='1'/>
+    </channel>
+
+    <!-- Maybe should comment for ubuntu -->
+    <graphics type='vnc' port='-1' autoport='yes' listen='127.0.0.1'>
+      <listen type='address' address='127.0.0.1'/>
+    </graphics>
+
+
+  </devices>
+</domain>

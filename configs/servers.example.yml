@@ -1,0 +1,71 @@
+---
+# Mnemosyne inventory — example
+# =============================
+# Copy this file to configs/servers.yml and edit it for your environment:
+#   cp configs/servers.example.yml configs/servers.yml
+#
+# The inventory is a LIST of "mnemons" (hypervisor groups). Each group is one
+# libvirt host plus the VMs that should exist on it. On every run Mnemosyne makes
+# the host match this file: VMs listed here but missing are created, VMs present
+# on the host but missing here are destroyed.
+#
+# All values below are FAKE and only illustrate the format.
+
+# ----- Group 1: a hypervisor host and its VMs --------------------------------
+- group: "hv01.example.lan"          # human-readable label (shown in logs/plan)
+  host: "192.0.2.10"                 # hypervisor address for the SSH/libvirt link
+  user: "virtops"                    # SSH user on the hypervisor
+  port: 22                           # SSH port (1-65535)
+  key: "~/.ssh/id_ed25519"           # PRIVATE SSH key on the machine running Mnemosyne
+  servers:
+
+    # --- VM #1: a small web node ---
+    - name: "web-01.example.lan"     # libvirt domain name, disk volume name AND hostname
+      cpu: "2"                       # vCPU count (positive integer, as a string)
+      ram: "2048"                    # RAM in MiB
+      ip: "192.0.2.40/24"            # primary address in CIDR notation
+      gateway: "192.0.2.1"           # default gateway (plain IPv4)
+      disk: 30                       # disk size in GiB (minimum 10); base image is resized to this
+      pool: "default"                # libvirt storage pool holding the base image and new disk
+      volLookup: "debian-13-genericcloud-amd64.qcow2"  # base image in `pool` to clone the disk from
+      network: "host-bridge"         # libvirt network / bridge to attach the VM to
+      launch: true                   # start the VM after it is defined
+      # Base URL where THIS VM reaches Mnemosyne's cloud-init server.
+      # Must be reachable from inside the guest — use the Mnemosyne host IP, port 8080, path /cloud-init/.
+      metaUrl: "http://192.0.2.5:8080/cloud-init/"
+
+    # --- VM #2: a cache node (relies on field defaults where possible) ---
+    - name: "cache-01.example.lan"
+      cpu: "4"
+      ram: "4096"
+      ip: "192.0.2.41/24"
+      gateway: "192.0.2.1"
+      disk: 40
+      pool: "default"
+      volLookup: "debian-13-genericcloud-amd64.qcow2"
+      network: "host-bridge"
+      metaUrl: "http://192.0.2.5:8080/cloud-init/"
+
+# ----- Group 2: a second hypervisor ------------------------------------------
+- group: "hv02.example.lan"
+  host: "192.0.2.20"
+  user: "virtops"
+  port: 22
+  key: "~/.ssh/id_ed25519"
+  servers:
+
+    - name: "db-01.example.lan"
+      cpu: "8"
+      ram: "16384"
+      ip: "198.51.100.50/24"
+      gateway: "198.51.100.1"
+      disk: 120
+      pool: "fast-ssd"
+      volLookup: "debian-13-genericcloud-amd64.qcow2"
+      network: "host-bridge"
+      metaUrl: "http://192.0.2.5:8080/cloud-init/"
+      # Override the default templates only if you keep them somewhere custom:
+      # serverTmpl: "/app/templates/server.xml"          # use server_arm.xml on aarch64 hosts
+      # volTmpl: "/app/templates/volume.xml"
+      # userDataTmpl: "/app/templates/user-data.yml"
+      # networkConfigTmpl: "/app/templates/network-config.yml"

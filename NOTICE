@@ -1,0 +1,84 @@
+Mnemosyne
+Copyright 2026 malkafen
+
+This product includes software developed by malkafen.
+Licensed under the Apache License, Version 2.0 (see the LICENSE file).
+
+================================================================================
+Third-party components
+================================================================================
+
+The distributable artifact (the shaded "uber" JAR produced by
+maven-shade-plugin) bundles the following third-party libraries. Each remains
+under its own license; the licenses are listed below. Full license texts are
+available from each project's website / source repository.
+
+--------------------------------------------------------------------------------
+libvirt-java (org.libvirt:libvirt)
+--------------------------------------------------------------------------------
+  License: GNU Lesser General Public License, version 2.1 or later (LGPL-2.1+)
+  Project: https://java.libvirt.org/
+  Source:  https://gitlab.com/libvirt/libvirt-java
+
+  This library is bundled in the uber JAR WITHOUT relocation or modification:
+  its classes keep their original `org.libvirt.*` package names. In accordance
+  with section 6 of the LGPL, a user may replace this component with a modified
+  version of libvirt-java by substituting the corresponding class files.
+  The complete corresponding source code is available at the URL above.
+
+--------------------------------------------------------------------------------
+Java Native Access - JNA (net.java.dev.jna:jna)
+--------------------------------------------------------------------------------
+  License: Apache License 2.0 OR LGPL-2.1+ (dual-licensed; used here under
+           Apache License 2.0)
+  Project: https://github.com/java-native-access/jna
+
+--------------------------------------------------------------------------------
+Logback (ch.qos.logback:logback-classic, logback-core)
+--------------------------------------------------------------------------------
+  License: Eclipse Public License 1.0 OR LGPL-2.1 (dual-licensed)
+  Copyright: QOS.ch Sarl
+  Project: https://logback.qos.ch/
+
+--------------------------------------------------------------------------------
+Jakarta Expression Language impl (org.glassfish:jakarta.el)
+--------------------------------------------------------------------------------
+  License: Eclipse Public License 2.0 OR GPL-2.0 with Classpath Exception
+  Project: https://eclipse-ee4j.github.io/el-ri/
+
+--------------------------------------------------------------------------------
+SLF4J API (org.slf4j:slf4j-api)
+--------------------------------------------------------------------------------
+  License: MIT License
+  Copyright: QOS.ch Sarl
+  Project: https://www.slf4j.org/
+
+--------------------------------------------------------------------------------
+EdDSA-Java (net.i2p.crypto:eddsa)
+--------------------------------------------------------------------------------
+  License: CC0 1.0 Universal (Public Domain Dedication)
+  Project: https://github.com/str4d/ed25519-java
+
+--------------------------------------------------------------------------------
+Components under the Apache License 2.0
+--------------------------------------------------------------------------------
+  The following bundled libraries are licensed under the Apache License,
+  Version 2.0 (the same license as this product):
+
+    - Jackson           (com.fasterxml.jackson.core:jackson-core,
+                          jackson-databind, jackson-annotations;
+                          com.fasterxml.jackson.dataformat:jackson-dataformat-yaml)
+                          Copyright FasterXML, LLC
+    - SnakeYAML         (org.yaml:snakeyaml)
+    - Apache MINA SSHD  (org.apache.sshd:sshd-sftp, sshd-core, sshd-common)
+                          Copyright The Apache Software Foundation
+    - Jakarta Bean Validation API
+                        (jakarta.validation:jakarta.validation-api)
+    - Hibernate Validator
+                        (org.hibernate.validator:hibernate-validator)
+                          Copyright Red Hat, Inc.
+
+================================================================================
+Note: Lombok (provided scope) and the test-scope libraries (JUnit, Mockito,
+AssertJ) are build/test-time only and are NOT included in the distributed JAR.
+================================================================================
