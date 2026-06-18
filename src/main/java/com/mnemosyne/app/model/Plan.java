@@ -15,13 +15,10 @@ public final class Plan {
   private final List<String> toDelete;
   private final List<String> unmanaged;
 
-  public Plan(List<DomainState> actual, List<Server> desired) {
+  public Plan(List<DomainState> actual, Map<String,Server> servers) {
 
-    HashMap<String, Server> serverById = new HashMap<>();
     HashMap<String, DomainState> managedD = new HashMap<>();
     HashMap<String, DomainState> unmanagedD = new HashMap<>();
-
-    for (Server s : desired) serverById.put(s.getId(), s);
 
     for (DomainState d : actual) {
       if ("mnemosyne".equals(d.managedBy())) managedD.put(d.serverId(), d);
@@ -29,22 +26,22 @@ public final class Plan {
     }
 
     this.toCreate =
-        serverById.values().stream()
-            .filter(n -> !managedD.containsKey(n.getId())) // check by id
-            .filter(n -> !unmanagedD.containsKey(n.getId())) // check by name
-            .collect(Collectors.toMap(n -> n.getId(), n -> n, (a, b) -> a, TreeMap::new));
+        servers.entrySet().stream()
+            .filter(e -> !managedD.containsKey(e.getKey()))
+            .filter(e -> !unmanagedD.containsKey(e.getKey()))
+            .collect(Collectors.toMap(e -> e.getKey(), e -> e.getValue(), (a, b) -> a, TreeMap::new)); 
 
     this.toUpdate =
         managedD.values().stream()
-            .filter(d -> serverById.containsKey(d.serverId()))
-            .filter(d -> !serverById.get(d.serverId()).getSpecHash().equals(d.specHash()))
+            .filter(d -> servers.containsKey(d.serverId()))
+            .filter(d -> !servers.get(d.serverId()).getSpecHash().equals(d.specHash()))
             .map(d -> d.name())
             .sorted()
             .toList();
 
     this.toDelete =
         managedD.values().stream()
-            .filter(d -> !serverById.containsKey(d.serverId()))
+            .filter(d -> !servers.containsKey(d.serverId()))
             .map(d -> d.name())
             .sorted()
             .toList();

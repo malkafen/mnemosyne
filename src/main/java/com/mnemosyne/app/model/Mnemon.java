@@ -8,6 +8,8 @@ import com.mnemosyne.app.validation.UniqueServerId;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.*;
 import java.io.File;
+import java.util.Map;
+import java.util.TreeMap;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
@@ -50,7 +52,7 @@ public class Mnemon {
   @NotNull(message = "Server list must not be null")
   @Size(min = 1, message = "Server list must not be empty")
   @Valid
-  private List<Server> servers;
+  private Map<String, Server> servers;
 
   private Plan plan;
 
