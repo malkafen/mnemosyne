@@ -2,9 +2,11 @@ package com.mnemosyne.app.model;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.dataformat.yaml.YAMLFactory;
+  import com.fasterxml.jackson.dataformat.yaml.YAMLFactory;
+  import org.yaml.snakeyaml.LoaderOptions;
+
 import com.mnemosyne.app.config.*;
 import com.mnemosyne.app.http.*;
-import com.mnemosyne.app.validation.UniqueServerId;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.*;
 import java.io.File;
@@ -30,7 +32,6 @@ import org.xml.sax.SAXException;
 
 @Getter
 @Setter
-@UniqueServerId
 public class Mnemon {
   @NotBlank(message = "Group name must not be blank")
   private String group;
@@ -64,12 +65,25 @@ public class Mnemon {
     String path = config.getServersPath();
     log.debug("Loading servers from {}", path);
 
-    ObjectMapper mapper = new ObjectMapper(new YAMLFactory());
+      LoaderOptions loaderOptions = new LoaderOptions();
+  loaderOptions.setAllowDuplicateKeys(false);
+  ObjectMapper mapper =
+      new ObjectMapper(YAMLFactory.builder().loaderOptions(loaderOptions).build());
+
     File file = new File(path);
     List<Mnemon> mnemones =
         mapper.readValue(
             file, mapper.getTypeFactory().constructCollectionType(List.class, Mnemon.class));
     log.debug("Loaded {} servers", mnemones.size());
+
+      for (Mnemon m : mnemones)
+    m.getServers().forEach((key, s) -> {
+      s.setId(key);
+      if (s.getName() == null || s.getName().isBlank()) s.setName(key);
+    });
+
+
+
     return mnemones;
   }
 
@@ -504,7 +518,7 @@ public class Mnemon {
   }
 
   public void freeDomains() {
-    for (Server s : servers) {
+    for (Server s : servers.values()) {
       if (s.getDomain() == null) continue;
       log.debug("Attempting to free domain '{}'...", s.getName());
       try {
@@ -519,12 +533,12 @@ public class Mnemon {
   }
 
   // refactor
-  private Server serverByName(String name) {
-    for (Server s : servers) {
-      if (s.getName().equals(name)) return s;
-    }
-    return null;
-  }
+  // private Server serverByName(String name) {
+  //   for (Server s : servers) {
+  //     if (s.getName().equals(name)) return s;
+  //   }
+  //   return null;
+  // }
 
   public void join() {
     if (plan == null) {
@@ -536,7 +550,7 @@ public class Mnemon {
     List<String> skipped = new ArrayList<>();
 
     for (String name : plan.getUnmanaged()) {
-      Server match = serverByName(name);
+      Server match = servers.get(name); //serverByName(name);
       if (match == null) {
         skipped.add(name); // нет matching server spec
         continue;
