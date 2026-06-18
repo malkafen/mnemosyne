@@ -132,9 +132,31 @@ public class Mnemon {
   }
 
   public void apply() throws Exception {
+    update();
     reconcile();
     createStorage();
     setupDomain();
+  }
+
+  public void update() throws LibvirtException {
+    for (String name : plan.getToUpdate()) {
+      Domain d = null;
+      Server s = null;
+      s = servers.get(name);
+      try {
+        d = connect.domainLookupByName(name);
+        if (s.getCpu() != d.getMaxVcpus()) {
+          d.setVcpusFlags(
+              s.getCpu(),
+              Domain.VcpuFlags.CONFIG | Domain.VcpuFlags.MAXIMUM);
+        }
+      } catch (Exception e) {
+        log.error("Domain '{}' will be skipping..", name, e);
+        continue;
+      } finally {
+        if (d != null) freeDomainQuietly(d);
+      }
+    }
   }
 
   // Storage provisioning
