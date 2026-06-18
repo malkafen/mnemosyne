@@ -45,7 +45,7 @@ public class Server {
 
   @Min(value = 256, message = "RAM must be at least 256 MiB")
   @Max(value = 1048576, message = "RAM must not exceed 1048576 MiB (1 TiB)")
-  private int ram;
+  private long ram;
 
   @NotBlank(message = "IP address is required")
   @Pattern(
@@ -89,6 +89,11 @@ public class Server {
   private boolean launch = true;
   private Status status = null;
 
+  public static String specHash(int cpu, long ram) {
+    String spec = String.join("\u001f", String.valueOf(cpu), String.valueOf(ram));
+    return Sha256Util.sha256Hex(spec);
+  }
+
   public void setStatus(Status status) {
     if (status == null) {
       throw new IllegalArgumentException("Status cannot be null");
@@ -102,13 +107,7 @@ public class Server {
   }
 
   public String getSpecHash() {
-    String spec =
-        String.join(
-            "\u001f",
-            String.valueOf(cpu),
-            String.valueOf(ram)
-        );
-    return Sha256Util.sha256Hex(spec);
+    return specHash(this.cpu, this.ram);
   }
 
   // XML builders

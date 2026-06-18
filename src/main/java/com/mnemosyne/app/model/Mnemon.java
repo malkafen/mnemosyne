@@ -146,9 +146,7 @@ public class Mnemon {
       try {
         d = connect.domainLookupByName(name);
         if (s.getCpu() != d.getMaxVcpus()) {
-          d.setVcpusFlags(
-              s.getCpu(),
-              Domain.VcpuFlags.CONFIG | Domain.VcpuFlags.MAXIMUM);
+          d.setVcpusFlags(s.getCpu(), Domain.VcpuFlags.CONFIG | Domain.VcpuFlags.MAXIMUM);
         }
       } catch (Exception e) {
         log.error("Domain '{}' will be skipping..", name, e);
