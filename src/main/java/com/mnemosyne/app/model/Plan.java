@@ -35,12 +35,7 @@ public final class Plan {
     this.toUpdate =
         managedD.values().stream()
             .filter(d -> servers.containsKey(d.serverId()))
-            .filter(
-                d ->
-                    !servers
-                        .get(d.serverId())
-                        .getSpecHash()
-                        .equals(Server.specHash(d.cpu(), d.ram())))
+            .filter(d -> specDrifted(servers.get(d.getId), d))
             .map(d -> d.name())
             .sorted()
             .toList();
@@ -77,5 +72,9 @@ public final class Plan {
     toCreate.keySet().forEach(n -> System.out.println("  + " + n));
     toUpdate.forEach(n -> System.out.println("  ~ " + n));
     toDelete.forEach(n -> System.out.println("  - " + n));
+  }
+
+  private boolean specDrifted(Server s, DomainState d) {
+    return !s.getSpecHash().equals(Server.specHash(d.cpu(), d.ram()));
   }
 }
