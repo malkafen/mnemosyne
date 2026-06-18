@@ -132,25 +132,39 @@ public class Mnemon {
   }
 
   public void apply() throws Exception {
-    update();
     reconcile();
+    update();
     createStorage();
     setupDomain();
   }
 
   public void update() throws LibvirtException {
-    for (String name : plan.getToUpdate()) {
+    if (plan == null) throw new IllegalStateException("update() called before plan was built");
+
+    for (String id : plan.getToUpdate()) {
+      Server s = servers.get(id);
       Domain d = null;
-      Server s = null;
-      s = servers.get(name);
       try {
-        d = connect.domainLookupByName(name);
+        d = connect.domainLookupByName(s.getName());
+        log.debug(
+            "Updating '{}' (id={}): desired cpu={} ram={}MiB",
+            s.getName(),
+            id,
+            s.getCpu(),
+            s.getRam());
+
         if (s.getCpu() != d.getMaxVcpus()) {
+          log.info("  cpu {} -> {}", d.getMaxVcpus(), s.getCpu());
           d.setVcpusFlags(s.getCpu(), Domain.VcpuFlags.CONFIG | Domain.VcpuFlags.MAXIMUM);
         }
+        if (s.getRam() != d.getMaxMemory() / 1024) {
+          log.info("  ram {} -> {} MiB", d.getMaxMemory() / 1024, s.getRam());
+          // d.setMemoryFlags(s.getRam() * 1024, Domain.MemoryModFlags.CONFIG |
+          // Domain.MemoryModFlags.MAXIMUM);
+          d.setMaxMemory(s.getRam() * 1024);
+        }
       } catch (Exception e) {
-        log.error("Domain '{}' will be skipping..", name, e);
-        continue;
+        log.error("Failed to update domain '{}', skipping", s.getName(), e);
       } finally {
         if (d != null) freeDomainQuietly(d);
       }
@@ -548,14 +562,6 @@ public class Mnemon {
       }
     }
   }
-
-  // refactor
-  // private Server serverByName(String name) {
-  //   for (Server s : servers) {
-  //     if (s.getName().equals(name)) return s;
-  //   }
-  //   return null;
-  // }
 
   public void join() {
     if (plan == null) {

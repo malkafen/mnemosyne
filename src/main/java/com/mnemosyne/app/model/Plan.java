@@ -35,8 +35,8 @@ public final class Plan {
     this.toUpdate =
         managedD.values().stream()
             .filter(d -> servers.containsKey(d.serverId()))
-            .filter(d -> specDrifted(servers.get(d.getId), d))
-            .map(d -> d.name())
+            .filter(d -> specDrifted(servers.get(d.serverId()), d))
+            .map(d -> d.serverId())
             .sorted()
             .toList();
 
