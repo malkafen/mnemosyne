@@ -2,19 +2,15 @@ package com.mnemosyne.app.model;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.dataformat.yaml.YAMLFactory;
-  import com.fasterxml.jackson.dataformat.yaml.YAMLFactory;
-  import org.yaml.snakeyaml.LoaderOptions;
-
 import com.mnemosyne.app.config.*;
 import com.mnemosyne.app.http.*;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.*;
 import java.io.File;
-import java.util.Map;
-import java.util.TreeMap;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import javax.xml.parsers.ParserConfigurationException;
 import lombok.Getter;
 import lombok.Setter;
@@ -29,6 +25,7 @@ import org.libvirt.jna.virError;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.xml.sax.SAXException;
+import org.yaml.snakeyaml.LoaderOptions;
 
 @Getter
 @Setter
@@ -65,10 +62,10 @@ public class Mnemon {
     String path = config.getServersPath();
     log.debug("Loading servers from {}", path);
 
-      LoaderOptions loaderOptions = new LoaderOptions();
-  loaderOptions.setAllowDuplicateKeys(false);
-  ObjectMapper mapper =
-      new ObjectMapper(YAMLFactory.builder().loaderOptions(loaderOptions).build());
+    LoaderOptions loaderOptions = new LoaderOptions();
+    loaderOptions.setAllowDuplicateKeys(false);
+    ObjectMapper mapper =
+        new ObjectMapper(YAMLFactory.builder().loaderOptions(loaderOptions).build());
 
     File file = new File(path);
     List<Mnemon> mnemones =
@@ -76,14 +73,14 @@ public class Mnemon {
             file, mapper.getTypeFactory().constructCollectionType(List.class, Mnemon.class));
     log.debug("Loaded {} servers", mnemones.size());
 
-      for (Mnemon m : mnemones)
-    m.getServers().forEach((key, s) -> {
-      s.setId(key);
-      if (s.getName() == null || s.getName().isBlank()) s.setName(key);
-    });
-
-
-
+    for (Mnemon m : mnemones) {
+      m.getServers()
+          .forEach(
+              (key, s) -> {
+                s.setId(key);
+                if (s.getName() == null || s.getName().isBlank()) s.setName(key);
+              });
+    }
     return mnemones;
   }
 
@@ -550,7 +547,12 @@ public class Mnemon {
     List<String> skipped = new ArrayList<>();
 
     for (String name : plan.getUnmanaged()) {
-      Server match = servers.get(name); //serverByName(name);
+      Server match =
+          servers.values().stream()
+              .filter(s -> name.equals(s.getName()))
+              .findFirst()
+              .orElse(null); // serverByName(name);
+
       if (match == null) {
         skipped.add(name); // нет matching server spec
         continue;

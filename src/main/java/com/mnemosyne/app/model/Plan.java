@@ -15,7 +15,7 @@ public final class Plan {
   private final List<String> toDelete;
   private final List<String> unmanaged;
 
-  public Plan(List<DomainState> actual, Map<String,Server> servers) {
+  public Plan(List<DomainState> actual, Map<String, Server> servers) {
 
     HashMap<String, DomainState> managedD = new HashMap<>();
     HashMap<String, DomainState> unmanagedD = new HashMap<>();
@@ -28,8 +28,9 @@ public final class Plan {
     this.toCreate =
         servers.entrySet().stream()
             .filter(e -> !managedD.containsKey(e.getKey()))
-            .filter(e -> !unmanagedD.containsKey(e.getKey()))
-            .collect(Collectors.toMap(e -> e.getKey(), e -> e.getValue(), (a, b) -> a, TreeMap::new)); 
+            .filter(e -> !unmanagedD.containsKey(e.getValue().getName()))
+            .collect(
+                Collectors.toMap(e -> e.getKey(), e -> e.getValue(), (a, b) -> a, TreeMap::new));
 
     this.toUpdate =
         managedD.values().stream()
