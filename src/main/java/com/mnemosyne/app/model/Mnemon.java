@@ -435,7 +435,7 @@ public class Mnemon {
         List<StorageVol> volumes = resolveVolumes(d, name);
         destroyDomain(d, name);
         undefineDomain(d, name);
-        // deleteVolumes(volumes, name);
+        deleteVolumes(volumes, name);
       } catch (Exception e) {
         log.error("Domain '{}' will be skipping..", name, e);
         continue;
