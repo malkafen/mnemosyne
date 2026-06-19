@@ -40,17 +40,14 @@ public final class TestData {
     return servers;
   }
 
-
-  private static DomainState domainStateFactory(String name, int cpu, int ram){
-    return new DomainState(name, cpu+1, ram, name, "1", "mnemosyne");
+  private static DomainState domainStateFactory(String name, int cpu, int ram) {
+    return new DomainState(name, cpu + 1, ram, name, "1", "mnemosyne");
   }
 
   public static List<DomainState> sampleDomainStates() {
     return new ArrayList<>(
         List.of(
             domainStateFactory("toUpdate", testCpu, testRam),
-            domainStateFactory("toDelete", testCpu, testRam)
-        )
-    );
+            domainStateFactory("toDelete", testCpu, testRam)));
   }
 }

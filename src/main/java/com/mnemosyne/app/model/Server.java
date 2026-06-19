@@ -127,7 +127,6 @@ public class Server {
     setElementText(doc, "memory", String.valueOf(this.ram));
     setElementText(doc, "vcpu", String.valueOf(this.cpu));
     setElementTextNS(doc, "https://mnemosyne.dev/schema/v1", "serverId", getId());
-    //setElementTextNS(doc, "https://mnemosyne.dev/schema/v1", "specHash", getSpecHash());
     setCloudInitSerial(doc);
     setDiskSource(doc);
     setInterfaceNetwork(doc);
@@ -139,10 +138,9 @@ public class Server {
         "<mnemosyne>"
             + "<managedBy>mnemosyne</managedBy>"
             + "<serverId>%s</serverId>"
-            //+ "<specHash>%s</specHash>"
             + "<specVersion>1</specVersion>"
             + "</mnemosyne>",
-        getId(), getSpecHash());
+        getId());
   }
 
   private void setElementTextNS(Document doc, String namespaceUri, String localName, String value) {

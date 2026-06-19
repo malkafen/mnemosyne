@@ -2,13 +2,7 @@ package com.mnemosyne.app.model;
 
 /** Read-only snapshot ("passport") of a libvirt domain as reported by libvirt. */
 public record DomainState(
-    String name,
-    int cpu,
-    long ram,
-    String serverId,
-    //String specHash,
-    String specVersion,
-    String managedBy) {
+    String name, int cpu, long ram, String serverId, String specVersion, String managedBy) {
 
   /** Whether this domain carries mnemosyne metadata (created or patched by us). */
   public boolean managed() {
