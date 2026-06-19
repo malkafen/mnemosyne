@@ -12,7 +12,7 @@ public final class TestData {
   private TestData() {}
   ;
 
-  private static final String[] testServers = {"toUpdate", "toDelete", "toCreate"};
+  private static final String[] testServers = {"toCreate", "toUpdate"};
   private static final int testCpu = 6;
   private static final int testRam = 4096;
   private static final String testIp = "192.168.70.70/24";
