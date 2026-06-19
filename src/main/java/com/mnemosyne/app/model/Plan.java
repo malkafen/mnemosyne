@@ -78,7 +78,9 @@ public final class Plan {
   }
 
   private boolean specDrifted(Server s, DomainState d) {
-    return !s.getSpecHash().equals(Server.specHash(d.cpu(), d.ram()));
+    // RAM is temporarily excluded from drift detection: libvirt-java 0.5.4
+    //return !s.getSpecHash().equals(Server.specHash(d.cpu(), d.ram()));
+    return s.getCpu() != d.cpu();
   }
 
   private String diff(Server s, DomainState d) {
