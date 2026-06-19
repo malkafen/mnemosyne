@@ -4,13 +4,13 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.dataformat.yaml.YAMLFactory;
 import com.mnemosyne.app.config.*;
 import com.mnemosyne.app.http.*;
-import com.mnemosyne.app.validation.UniqueServerId;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.*;
 import java.io.File;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import javax.xml.parsers.ParserConfigurationException;
 import lombok.Getter;
 import lombok.Setter;
@@ -25,10 +25,10 @@ import org.libvirt.jna.virError;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.xml.sax.SAXException;
+import org.yaml.snakeyaml.LoaderOptions;
 
 @Getter
 @Setter
-@UniqueServerId
 public class Mnemon {
   @NotBlank(message = "Group name must not be blank")
   private String group;
@@ -50,7 +50,7 @@ public class Mnemon {
   @NotNull(message = "Server list must not be null")
   @Size(min = 1, message = "Server list must not be empty")
   @Valid
-  private List<Server> servers;
+  private Map<String, Server> servers;
 
   private Plan plan;
 
@@ -62,12 +62,25 @@ public class Mnemon {
     String path = config.getServersPath();
     log.debug("Loading servers from {}", path);
 
-    ObjectMapper mapper = new ObjectMapper(new YAMLFactory());
+    LoaderOptions loaderOptions = new LoaderOptions();
+    loaderOptions.setAllowDuplicateKeys(false);
+    ObjectMapper mapper =
+        new ObjectMapper(YAMLFactory.builder().loaderOptions(loaderOptions).build());
+
     File file = new File(path);
     List<Mnemon> mnemones =
         mapper.readValue(
             file, mapper.getTypeFactory().constructCollectionType(List.class, Mnemon.class));
     log.debug("Loaded {} servers", mnemones.size());
+
+    for (Mnemon m : mnemones) {
+      m.getServers()
+          .forEach(
+              (key, s) -> {
+                s.setId(key);
+                if (s.getName() == null || s.getName().isBlank()) s.setName(key);
+              });
+    }
     return mnemones;
   }
 
@@ -120,8 +133,45 @@ public class Mnemon {
 
   public void apply() throws Exception {
     reconcile();
+    update();
     createStorage();
     setupDomain();
+  }
+
+  public void update() throws LibvirtException {
+    if (plan == null) throw new IllegalStateException("update() called before plan was built");
+
+    for (String id : plan.getToUpdate().keySet()) {
+      Server s = servers.get(id);
+      Domain d = null;
+      try {
+        d = connect.domainLookupByName(s.getName());
+        log.debug(
+            "Updating '{}' (id={}): desired cpu={} ram={}MiB",
+            s.getName(),
+            id,
+            s.getCpu(),
+            s.getRam());
+
+        if (s.getCpu() != d.getMaxVcpus()) {
+          log.info("{}:  cpu {} -> {}", d.getName(), d.getMaxVcpus(), s.getCpu());
+          d.setVcpusFlags(s.getCpu(), Domain.VcpuFlags.CONFIG | Domain.VcpuFlags.MAXIMUM);
+        }
+        // TODO: re-enable memory updates once libvirt-java ships Domain.setMemoryFlags /
+        // MemoryModFlags
+        // (master, after v0.5.4).
+        // if (s.getRam() != d.getMaxMemory() / 1024) {
+        // log.info("{}:  ram {} -> {} MiB", d.getName(), d.getMaxMemory() / 1024, s.getRam());
+        // d.setMemoryFlags(s.getRam() * 1024, Domain.MemoryModFlags.CONFIG |
+        // Domain.MemoryModFlags.MAXIMUM);
+        // d.setMaxMemory(s.getRam() * 1024);
+        // }
+      } catch (Exception e) {
+        log.error("Failed to update domain '{}', skipping", s.getName(), e);
+      } finally {
+        if (d != null) freeDomainQuietly(d);
+      }
+    }
   }
 
   // Storage provisioning
@@ -502,7 +552,7 @@ public class Mnemon {
   }
 
   public void freeDomains() {
-    for (Server s : servers) {
+    for (Server s : servers.values()) {
       if (s.getDomain() == null) continue;
       log.debug("Attempting to free domain '{}'...", s.getName());
       try {
@@ -516,14 +566,6 @@ public class Mnemon {
     }
   }
 
-  // refactor
-  private Server serverByName(String name) {
-    for (Server s : servers) {
-      if (s.getName().equals(name)) return s;
-    }
-    return null;
-  }
-
   public void join() {
     if (plan == null) {
       System.out.printf("[ %s ]  nothing to join (no plan)%n", group);
@@ -534,7 +576,12 @@ public class Mnemon {
     List<String> skipped = new ArrayList<>();
 
     for (String name : plan.getUnmanaged()) {
-      Server match = serverByName(name);
+      Server match =
+          servers.values().stream()
+              .filter(s -> name.equals(s.getName()))
+              .findFirst()
+              .orElse(null); // serverByName(name);
+
       if (match == null) {
         skipped.add(name); // нет matching server spec
         continue;

@@ -9,6 +9,12 @@
 # the host match this file: VMs listed here but missing are created, VMs present
 # on the host but missing here are destroyed.
 #
+# Inside a group, `servers` is a MAP. The map KEY is the server id — a stable
+# identity stored in the VM's libvirt metadata. Matching of managed VMs is done
+# by this id, so you can rename a VM (change `name`) without recreating it.
+# `name` is the libvirt domain name / disk volume name / hostname; if omitted it
+# defaults to the key. Keep the key stable; change `name` freely.
+#
 # All values below are FAKE and only illustrate the format.
 
 # ----- Group 1: a hypervisor host and its VMs --------------------------------
@@ -20,7 +26,8 @@
   servers:
 
     # --- VM #1: a small web node ---
-    - name: "web-01.example.lan"     # libvirt domain name, disk volume name AND hostname
+    # `name` omitted → libvirt domain name / hostname defaults to the key below.
+    web-01.example.lan:              # server id (stable) AND, here, the domain name
       cpu: "2"                       # vCPU count (positive integer, as a string)
       ram: "2048"                    # RAM in MiB
       ip: "192.0.2.40/24"            # primary address in CIDR notation
@@ -35,7 +42,10 @@
       metaUrl: "http://192.0.2.5:8080/cloud-init/"
 
     # --- VM #2: a cache node (relies on field defaults where possible) ---
-    - name: "cache-01.example.lan"
+    # `name` set explicitly → the key stays the stable id, the domain can be
+    # renamed later by editing `name` without recreating the VM.
+    cache-01:                        # server id (stable)
+      name: "cache-01.example.lan"   # libvirt domain name / hostname
       cpu: "4"
       ram: "4096"
       ip: "192.0.2.41/24"
@@ -54,7 +64,7 @@
   key: "~/.ssh/id_ed25519"
   servers:
 
-    - name: "db-01.example.lan"
+    db-01.example.lan:
       cpu: "8"
       ram: "16384"
       ip: "198.51.100.50/24"

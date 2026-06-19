@@ -1,5 +1,3 @@
 package com.mnemosyne.app;
 
-public class Mnemosyne {
-    
-}
+public class Mnemosyne {}

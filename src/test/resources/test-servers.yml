@@ -7,7 +7,7 @@
   port: 22
   host: "192.0.2.10"
   servers:
-    - name: "core-db-test-a.example.lan"
+    "core-db-test-a.example.lan":
       cpu: "4"
       ram: "4096"
       ip: "192.0.2.45/24"
@@ -23,7 +23,7 @@
       metaUrl: "http://192.0.2.5:8080/cloud-init/"
       network: "host-bridge"
 
-    - name: "core-db-test-b.example.lan"
+    "core-db-test-b.example.lan":
       cpu: "4"
       ram: "4096"
       ip: "192.0.2.46/24"
@@ -45,7 +45,7 @@
   port: 22
   host: "192.0.2.15"
   servers:
-    - name: "desktop-test.example.lan"
+    "desktop-test.example.lan":
       cpu: "2"
       ram: "1024"
       ip: "198.51.100.98/24"
@@ -67,7 +67,7 @@
   port: 22
   host: "192.0.2.20"
   servers:
-    - name: "cloud-test.example.lan"
+    "cloud-test.example.lan":
       cpu: "2"
       ram: "4096"
       ip: "192.0.2.45/24"
@@ -83,7 +83,7 @@
       metaUrl: "http://192.0.2.5:8080/cloud-init/"
       network: "host-bridge"
 
-    - name: "image-test.example.lan"
+    "image-test.example.lan":
       cpu: "12"
       ram: "4096"
       ip: "192.0.2.46/24"

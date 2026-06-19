@@ -39,13 +39,13 @@ public class Server {
 
   private String specHash;
 
-  @NotBlank(message = "CPU count is required")
-  @Pattern(regexp = "^[1-9]\\d*$", message = "CPU must be a positive integer")
-  private String cpu = "2";
+  @Min(value = 1, message = "CPU must be at least 1")
+  @Max(value = 128, message = "CPU must not exceed 128")
+  private int cpu;
 
-  @NotBlank(message = "RAM is required")
-  @Pattern(regexp = "^[1-9]\\d*$", message = "RAM must be a positive integer (MiB)")
-  private String ram = "1024";
+  @Min(value = 256, message = "RAM must be at least 256 MiB")
+  @Max(value = 1048576, message = "RAM must not exceed 1048576 MiB (1 TiB)")
+  private long ram;
 
   @NotBlank(message = "IP address is required")
   @Pattern(
@@ -89,6 +89,11 @@ public class Server {
   private boolean launch = true;
   private Status status = null;
 
+  public static String specHash(int cpu, long ram) {
+    String spec = String.join("\u001f", String.valueOf(cpu), String.valueOf(ram));
+    return Sha256Util.sha256Hex(spec);
+  }
+
   public void setStatus(Status status) {
     if (status == null) {
       throw new IllegalArgumentException("Status cannot be null");
@@ -102,17 +107,7 @@ public class Server {
   }
 
   public String getSpecHash() {
-    String spec =
-        String.join(
-            "\u001f",
-            cpu,
-            ram,
-            String.valueOf(disk),
-            volLookup,
-            network,
-            ip,
-            gateway == null ? "" : gateway);
-    return Sha256Util.sha256Hex(spec);
+    return specHash(this.cpu, this.ram);
   }
 
   // XML builders
@@ -132,7 +127,6 @@ public class Server {
     setElementText(doc, "memory", String.valueOf(this.ram));
     setElementText(doc, "vcpu", String.valueOf(this.cpu));
     setElementTextNS(doc, "https://mnemosyne.dev/schema/v1", "serverId", getId());
-    setElementTextNS(doc, "https://mnemosyne.dev/schema/v1", "specHash", getSpecHash());
     setCloudInitSerial(doc);
     setDiskSource(doc);
     setInterfaceNetwork(doc);
@@ -144,10 +138,9 @@ public class Server {
         "<mnemosyne>"
             + "<managedBy>mnemosyne</managedBy>"
             + "<serverId>%s</serverId>"
-            + "<specHash>%s</specHash>"
             + "<specVersion>1</specVersion>"
             + "</mnemosyne>",
-        getId(), getSpecHash());
+        getId());
   }
 
   private void setElementTextNS(Document doc, String namespaceUri, String localName, String value) {

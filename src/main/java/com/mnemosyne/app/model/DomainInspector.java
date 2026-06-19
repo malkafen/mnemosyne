@@ -65,16 +65,21 @@ final class DomainInspector {
     Document doc = parse(domainXml);
 
     String name = firstText(doc, "name");
+    int cpu = Integer.parseInt(firstText(doc, "vcpu").trim());
+    long ram = Long.parseLong(firstText(doc, "memory").trim()) / 1024;
 
     Element meta = firstNS(doc, MNEM_NS, "mnemosyne");
     if (meta == null) {
-      return new DomainState(name, null, null, null, null);
+      // return new DomainState(name, 0, 0, null, null, null, null);
+      return new DomainState(name, 0, 0, null, null, null);
     }
 
     return new DomainState(
         name,
+        cpu,
+        ram,
         textNS(meta, MNEM_NS, "serverId"),
-        textNS(meta, MNEM_NS, "specHash"),
+        // textNS(meta, MNEM_NS, "specHash"),
         textNS(meta, MNEM_NS, "specVersion"),
         textNS(meta, MNEM_NS, "managedBy"));
   }
