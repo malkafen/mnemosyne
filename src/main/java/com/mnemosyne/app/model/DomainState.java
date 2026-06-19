@@ -6,7 +6,7 @@ public record DomainState(
     int cpu,
     long ram,
     String serverId,
-    String specHash,
+    //String specHash,
     String specVersion,
     String managedBy) {
 

@@ -70,7 +70,8 @@ final class DomainInspector {
 
     Element meta = firstNS(doc, MNEM_NS, "mnemosyne");
     if (meta == null) {
-      return new DomainState(name, 0, 0, null, null, null, null);
+      //return new DomainState(name, 0, 0, null, null, null, null);
+      return new DomainState(name, 0, 0, null, null, null);
     }
 
     return new DomainState(
@@ -78,7 +79,7 @@ final class DomainInspector {
         cpu,
         ram,
         textNS(meta, MNEM_NS, "serverId"),
-        textNS(meta, MNEM_NS, "specHash"),
+        //textNS(meta, MNEM_NS, "specHash"),
         textNS(meta, MNEM_NS, "specVersion"),
         textNS(meta, MNEM_NS, "managedBy"));
   }
