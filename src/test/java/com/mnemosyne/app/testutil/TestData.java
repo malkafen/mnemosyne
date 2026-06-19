@@ -12,7 +12,7 @@ public final class TestData {
   private TestData() {}
   ;
 
-  private static final String[] testServers = {"toUpdate", "toDelete", "toCreate"};
+  private static final String[] testServers = {"toCreate", "toUpdate"};
   private static final int testCpu = 6;
   private static final int testRam = 4096;
   private static final String testIp = "192.168.70.70/24";
@@ -36,18 +36,14 @@ public final class TestData {
       Server s = ServerFactory(name);
       servers.put(s.getId(), s);
     }
-
     return servers;
-  }
-
-  private static DomainState domainStateFactory(String name, int cpu, int ram) {
-    return new DomainState(name, cpu + 1, ram, name, "1", "mnemosyne");
   }
 
   public static List<DomainState> sampleDomainStates() {
     return new ArrayList<>(
         List.of(
-            domainStateFactory("toUpdate", testCpu, testRam),
-            domainStateFactory("toDelete", testCpu, testRam)));
+            new DomainState("toUpdate", testCpu + 1, testRam, "toUpdate", "1", "mnemosyne"),
+            new DomainState("toDelete-vm", testCpu, testRam, "toDelete-id", "1", "mnemosyne"),
+            new DomainState("neverToDelete", testCpu, testRam, null, null, null)));
   }
 }
