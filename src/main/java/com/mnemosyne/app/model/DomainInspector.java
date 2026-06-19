@@ -71,7 +71,7 @@ final class DomainInspector {
     Element meta = firstNS(doc, MNEM_NS, "mnemosyne");
     if (meta == null) {
       // return new DomainState(name, 0, 0, null, null, null, null);
-      return new DomainState(name, 0, 0, null, null, null);
+      return new DomainState(name, cpu, ram, null, null, null);
     }
 
     return new DomainState(
