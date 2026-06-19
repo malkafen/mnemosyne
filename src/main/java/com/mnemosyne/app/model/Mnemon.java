@@ -141,7 +141,7 @@ public class Mnemon {
   public void update() throws LibvirtException {
     if (plan == null) throw new IllegalStateException("update() called before plan was built");
 
-    for (String id : plan.getToUpdate()) {
+    for (String id : plan.getToUpdate().keySet()) {
       Server s = servers.get(id);
       Domain d = null;
       try {

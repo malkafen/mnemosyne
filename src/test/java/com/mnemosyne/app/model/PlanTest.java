@@ -24,6 +24,6 @@ public class PlanTest {
     Plan result = new Plan(actual, servers);
 
     // Assert
-    assertThat(result.getToUpdate()).contains("toUpdate");
+    assertThat(result.getToUpdate().keySet()).contains("toUpdate");
   }
 }

@@ -11,7 +11,7 @@ import lombok.Getter;
 public final class Plan {
 
   private final Map<String, Server> toCreate;
-  private final List<String> toUpdate;
+  private final Map<String, String> toUpdate;
   private final List<String> toDelete;
   private final List<String> unmanaged;
 
@@ -36,9 +36,12 @@ public final class Plan {
         managedD.values().stream()
             .filter(d -> servers.containsKey(d.serverId()))
             .filter(d -> specDrifted(servers.get(d.serverId()), d))
-            .map(d -> d.serverId())
-            .sorted()
-            .toList();
+            .collect(
+                Collectors.toMap(
+                    d -> d.serverId(),
+                    d -> diff(servers.get(d.serverId()), d),
+                    (a, b) -> a,
+                    TreeMap::new));
 
     this.toDelete =
         managedD.values().stream()
@@ -70,11 +73,18 @@ public final class Plan {
         "[ %s ]  create: %d, update: %d, delete: %d%n",
         group, toCreate.size(), toUpdate.size(), toDelete.size());
     toCreate.keySet().forEach(n -> System.out.println("  + " + n));
-    toUpdate.forEach(n -> System.out.println("  ~ " + n));
+    toUpdate.forEach((id, diff) -> System.out.println("  ~ " + id + "  " + diff));
     toDelete.forEach(n -> System.out.println("  - " + n));
   }
 
   private boolean specDrifted(Server s, DomainState d) {
     return !s.getSpecHash().equals(Server.specHash(d.cpu(), d.ram()));
+  }
+
+  private String diff(Server s, DomainState d) {
+    StringBuilder sb = new StringBuilder();
+    if (s.getCpu() != d.cpu()) sb.append(String.format(" cpu %d->%d", d.cpu(), s.getCpu()));
+    if (s.getRam() != d.ram()) sb.append(String.format(" ram %d->%d", d.ram(), s.getRam()));
+    return sb.toString().trim();
   }
 }
