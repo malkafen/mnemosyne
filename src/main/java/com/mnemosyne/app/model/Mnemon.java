@@ -157,13 +157,15 @@ public class Mnemon {
           log.info("{}:  cpu {} -> {}", d.getName(), d.getMaxVcpus(), s.getCpu());
           d.setVcpusFlags(s.getCpu(), Domain.VcpuFlags.CONFIG | Domain.VcpuFlags.MAXIMUM);
         }
-        // TODO: re-enable memory updates once libvirt-java ships
-        //if (s.getRam() != d.getMaxMemory() / 1024) {
-          //log.info("{}:  ram {} -> {} MiB", d.getName(), d.getMaxMemory() / 1024, s.getRam());
-          //d.setMemoryFlags(s.getRam() * 1024, Domain.MemoryModFlags.CONFIG |
-          //Domain.MemoryModFlags.MAXIMUM);
-          //d.setMaxMemory(s.getRam() * 1024);
-        //}
+        // TODO: re-enable memory updates once libvirt-java ships Domain.setMemoryFlags /
+        // MemoryModFlags
+        // (master, after v0.5.4).
+        // if (s.getRam() != d.getMaxMemory() / 1024) {
+        // log.info("{}:  ram {} -> {} MiB", d.getName(), d.getMaxMemory() / 1024, s.getRam());
+        // d.setMemoryFlags(s.getRam() * 1024, Domain.MemoryModFlags.CONFIG |
+        // Domain.MemoryModFlags.MAXIMUM);
+        // d.setMaxMemory(s.getRam() * 1024);
+        // }
       } catch (Exception e) {
         log.error("Failed to update domain '{}', skipping", s.getName(), e);
       } finally {

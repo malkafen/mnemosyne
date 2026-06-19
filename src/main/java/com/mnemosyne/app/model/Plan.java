@@ -79,14 +79,15 @@ public final class Plan {
 
   private boolean specDrifted(Server s, DomainState d) {
     // RAM is temporarily excluded from drift detection: libvirt-java 0.5.4
-    //return !s.getSpecHash().equals(Server.specHash(d.cpu(), d.ram()));
+    // return !s.getSpecHash().equals(Server.specHash(d.cpu(), d.ram()));
     return s.getCpu() != d.cpu();
   }
 
   private String diff(Server s, DomainState d) {
     StringBuilder sb = new StringBuilder();
     if (s.getCpu() != d.cpu()) sb.append(String.format(" cpu %d->%d", d.cpu(), s.getCpu()));
-    if (s.getRam() != d.ram()) sb.append(String.format(" ram %d->%d", d.ram(), s.getRam()));
+    // RAM excluded from the plan output until libvirt-java ships setMemoryFlags:
+    // if (s.getRam() != d.ram()) sb.append(String.format(" ram %d->%d", d.ram(), s.getRam()));
     return sb.toString().trim();
   }
 }
