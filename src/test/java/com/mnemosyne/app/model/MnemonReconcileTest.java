@@ -2,12 +2,12 @@ package com.mnemosyne.app.model;
 
 import static org.mockito.Mockito.*;
 
-import org.junit.jupiter.api.Test;
-import org.mockito.InOrder;
-import org.libvirt.Connect;
 import java.util.List;
+import org.junit.jupiter.api.Test;
+import org.libvirt.Connect;
 import org.libvirt.Domain;
 import org.libvirt.StorageVol;
+import org.mockito.InOrder;
 
 public class MnemonReconcileTest {
   // Arange
@@ -45,12 +45,11 @@ public class MnemonReconcileTest {
     m.reconcile();
 
     // Assert
-    InOrder inOder = inOrder(domain,vol);
+    InOrder inOder = inOrder(domain, vol);
     inOder.verify(domain).destroy();
     inOder.verify(domain).undefine();
     inOder.verify(vol).delete(0);
     inOder.verify(vol).free();
     inOder.verify(domain).free();
-    
   }
 }
