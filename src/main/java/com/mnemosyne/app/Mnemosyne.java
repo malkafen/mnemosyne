@@ -43,9 +43,9 @@ class Mnemosyne {
       }
 
       if (config.isPlanOnly()) return;
+      confirmWindow();
 
       for (Mnemon m : mnemones) {
-        confirmWindow();
         if (config.isJoin()) m.join();
         else m.apply();
       }
