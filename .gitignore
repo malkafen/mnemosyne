@@ -6,6 +6,7 @@ build
 *dev*
 target
 dependency-reduced-pom.xml
+.claude
 
 # Local inventories — contain private hosts/keys. Start from configs/servers.example.yml
 configs/servers.yml
