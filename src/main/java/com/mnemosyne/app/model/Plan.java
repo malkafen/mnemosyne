@@ -54,7 +54,7 @@ public final class Plan {
   }
 
   public void print(String group, boolean printJoin) {
-
+    System.out.println();
     if (printJoin) {
       if (unmanaged.isEmpty()) return;
       System.out.printf("[ %s ]  unmanaged (can be adopted): %d%n", group, unmanaged.size());

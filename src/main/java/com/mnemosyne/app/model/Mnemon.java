@@ -591,12 +591,13 @@ public class Mnemon {
     }
 
     if (joined.isEmpty()) {
-      System.out.printf("[ %s ]  nothing joined (skipped: %d)%n", group, skipped.size());
+      System.out.printf("%n[ %s ]  nothing joined (skipped: %d)%n", group, skipped.size());
     } else {
-      System.out.printf("[ %s ]  joined: %d (skipped: %d)%n", group, joined.size(), skipped.size());
+      System.out.printf("%n[ %s ]  joined: %d (skipped: %d)%n", group, joined.size(), skipped.size());
     }
     joined.forEach(n -> System.out.println("  + " + n));
     skipped.forEach(n -> System.out.println("  · " + n));
+    System.out.println();
   }
 
   private boolean joinDomain(String name, Server s) {
