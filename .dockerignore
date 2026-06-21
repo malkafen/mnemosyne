@@ -1,0 +1,17 @@
+  .git
+  .gitignore
+  target
+  *.jar
+  dependency-reduced-pom.xml
+
+  .idea
+  *.iml
+  .claude
+
+  configs/servers.yml
+  configs/servers_prod.yml
+  configs/servers_dev.yml
+  templates/*-dev.yml
+  templates/*.example.yml
+
+  README*.md
