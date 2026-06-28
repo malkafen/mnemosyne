@@ -1,4 +1,4 @@
-FROM maven:4.0.0-rc-5-amazoncorretto-17-debian-trixie AS build
+FROM maven:3.9-eclipse-temurin-17 AS build
 WORKDIR /app
 COPY . .
 RUN --mount=type=cache,target=/root/.m2 mvn clean package
