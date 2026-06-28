@@ -67,21 +67,15 @@ public class Server {
 
   private Domain domain = null;
 
-  private String serverTmpl = "/app/templates/server.xml";
+  private Templates templates;
 
-  private String volTmpl = "/app/templates/volume.xml";
-
-  private String userDataTmpl = "/app/templates/user-data.yml";
-
-  private String networkConfigTmpl = "/app/templates/network-config.yml";
-
-  private String volLookup = "noble-server-cloudimg-amd64.img";
-
-  private String volPath = null;
+  private String volLookup;
 
   @NotBlank(message = "Cloud-init metadata base URL is required")
   @Pattern(regexp = "^https?://.+", message = "metaUrl must be a valid HTTP/HTTPS URL")
-  private String metaUrl = "http://127.0.0.1:80/files/";
+  private String metaUrl;
+
+  private String volPath = null;
 
   @NotBlank(message = "Libvirt network name is required")
   private String network = "default";
@@ -114,7 +108,7 @@ public class Server {
 
   public String buildVolumeXml()
       throws ParserConfigurationException, SAXException, IOException, TransformerException {
-    Document doc = loadXmlTemplate(this.volTmpl);
+    Document doc = loadXmlTemplate(this.templates.getVolTmpl());
     setElementText(doc, "name", this.name);
     setElementText(doc, "capacity", String.valueOf(this.disk));
     return documentToString(doc);
@@ -122,7 +116,7 @@ public class Server {
 
   public String buildServerXml()
       throws ParserConfigurationException, SAXException, IOException, TransformerException {
-    Document doc = loadXmlTemplate(this.serverTmpl);
+    Document doc = loadXmlTemplate(this.templates.getServerTmpl());
     setElementText(doc, "name", this.name);
     setElementText(doc, "memory", String.valueOf(this.ram));
     setElementText(doc, "vcpu", String.valueOf(this.cpu));
@@ -214,7 +208,7 @@ public class Server {
   // YAML builders
 
   public String buildUserDataYaml() throws Exception {
-    Map<String, Object> yaml = loadYamlTemplate(this.userDataTmpl);
+    Map<String, Object> yaml = loadYamlTemplate(this.templates.getUserDataTmpl());
     yaml.put("hostname", this.name);
     yaml.put("fqdn", this.name);
     /* Map<String, Object> network = (Map<String, Object>) yaml.get("network");
@@ -227,7 +221,7 @@ public class Server {
 
   @SuppressWarnings("unchecked")
   public String buildNetworkConfigYaml() throws Exception {
-    Map<String, Object> yaml = loadYamlTemplate(this.networkConfigTmpl);
+    Map<String, Object> yaml = loadYamlTemplate(this.templates.getNetworkConfigTmpl());
     Map<String, Object> ethernets = (Map<String, Object>) yaml.get("ethernets");
     Map<String, Object> vif0 = (Map<String, Object>) ethernets.get("vif0");
     vif0.put("addresses", List.of(this.ip));
