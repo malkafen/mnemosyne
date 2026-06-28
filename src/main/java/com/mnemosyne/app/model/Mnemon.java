@@ -45,6 +45,16 @@ public class Mnemon {
   @NotBlank(message = "Host must not be blank")
   private String host;
 
+  @jakarta.validation.Valid @com.fasterxml.jackson.annotation.JsonMerge
+  private Templates templates = Templates.defaults();
+
+  @NotBlank(message = "volLookup must not be blank")
+  private String volLookup = "noble-server-cloudimg-amd64.img";
+
+  @NotBlank(message = "Cloud-init metadata base URL is required")
+  @Pattern(regexp = "^https?://.+", message = "metaUrl must be a valid HTTP/HTTPS URL")
+  private String metaUrl = "http://127.0.0.1:80/files/";
+
   private Connect connect;
 
   @NotNull(message = "Server list must not be null")
@@ -74,11 +84,18 @@ public class Mnemon {
     log.debug("Loaded {} servers", mnemones.size());
 
     for (Mnemon m : mnemones) {
+      Templates groupTmpl = m.getTemplates();
       m.getServers()
           .forEach(
               (key, s) -> {
                 s.setId(key);
                 if (s.getName() == null || s.getName().isBlank()) s.setName(key);
+
+                Templates override = s.getTemplates();
+                s.setTemplates(override == null ? groupTmpl : override.resolveOver(groupTmpl));
+
+                if (s.getVolLookup() == null) s.setVolLookup(m.getVolLookup());
+                if (s.getMetaUrl() == null) s.setMetaUrl(m.getMetaUrl());
               });
     }
     return mnemones;
@@ -593,7 +610,8 @@ public class Mnemon {
     if (joined.isEmpty()) {
       System.out.printf("%n[ %s ]  nothing joined (skipped: %d)%n", group, skipped.size());
     } else {
-      System.out.printf("%n[ %s ]  joined: %d (skipped: %d)%n", group, joined.size(), skipped.size());
+      System.out.printf(
+          "%n[ %s ]  joined: %d (skipped: %d)%n", group, joined.size(), skipped.size());
     }
     joined.forEach(n -> System.out.println("  + " + n));
     skipped.forEach(n -> System.out.println("  · " + n));

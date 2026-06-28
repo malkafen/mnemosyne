@@ -6,6 +6,8 @@
   key: "./templates/id_ed25519"
   port: 22
   host: "192.0.2.10"
+  metaUrl: "http://192.0.2.5:8080/cloud-init/"
+  volLookup: "debian-13-genericcloud-amd64.qcow2"
   servers:
     "core-db-test-a.example.lan":
       cpu: "4"
@@ -14,13 +16,7 @@
       gateway: "192.0.2.1"
       disk: 40
       pool: "default"
-      volLookup: "debian-13-genericcloud-amd64.qcow2"
       launch: true
-      serverTmpl: "./templates/server.xml"
-      volTmpl: "./templates/volume.xml"
-      userDataTmpl: "./templates/user-data.yml"
-      networkConfigTmpl: "./templates/network-config.yml"
-      metaUrl: "http://192.0.2.5:8080/cloud-init/"
       network: "host-bridge"
 
     "core-db-test-b.example.lan":
@@ -30,13 +26,7 @@
       gateway: "192.0.2.1"
       disk: 30
       pool: "default"
-      volLookup: "debian-13-genericcloud-amd64.qcow2"
       launch: true
-      serverTmpl: "./templates/server.xml"
-      volTmpl: "./templates/volume.xml"
-      userDataTmpl: "./templates/user-data.yml"
-      networkConfigTmpl: "./templates/network-config.yml"
-      metaUrl: "http://192.0.2.5:8080/cloud-init/"
       network: "host-bridge"
 
 - group: "hv02-test.example.lan"
@@ -54,10 +44,6 @@
       pool: "default"
       volLookup: "debian-13-genericcloud-amd64.qcow2"
       launch: true
-      serverTmpl: "./templates/server.xml"
-      volTmpl: "./templates/volume.xml"
-      userDataTmpl: "./templates/user-data.yml"
-      networkConfigTmpl: "./templates/network-config.yml"
       metaUrl: "http://192.0.2.5:8080/cloud-init/"
       network: "routed_network"
 
@@ -66,6 +52,11 @@
   key: "./templates/id_ed25519"
   port: 22
   host: "192.0.2.20"
+  templates:
+    serverTmpl: "/app/templates/server.xml"
+    volTmpl: "/app/templates/volume.xml"
+    userDataTmpl: "/app/templates/user-data.yml"
+    networkConfigTmpl: "/app/templates/network-config.yml"
   servers:
     "cloud-test.example.lan":
       cpu: "2"
@@ -76,10 +67,6 @@
       pool: "default"
       volLookup: "debian-13-genericcloud-amd64.qcow2"
       launch: true
-      serverTmpl: "./templates/server.xml"
-      volTmpl: "./templates/volume.xml"
-      userDataTmpl: "./templates/user-data.yml"
-      networkConfigTmpl: "./templates/network-config.yml"
       metaUrl: "http://192.0.2.5:8080/cloud-init/"
       network: "host-bridge"
 
@@ -92,9 +79,5 @@
       pool: "fast-ssd"
       volLookup: "debian-13-genericcloud-amd64.qcow2"
       launch: true
-      serverTmpl: "./templates/server.xml"
-      volTmpl: "./templates/volume.xml"
-      userDataTmpl: "./templates/user-data.yml"
-      networkConfigTmpl: "./templates/network-config.yml"
       metaUrl: "http://192.0.2.5:8080/cloud-init/"
       network: "host-bridge"
