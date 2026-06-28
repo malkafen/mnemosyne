@@ -39,29 +39,29 @@ booted VMs from a small built-in HTTP server.
                          ┌──────────────────────────────────────────────────┐
    configs/servers.yml ─▶│  1 · load + validate          desired state      │
                          └────────────────────────┬─────────────────────────┘
-                                                   │  qemu+ssh
-                                                   ▼
+                                                  │  qemu+ssh
+                                                  ▼
                          ┌──────────────────────────────────────────────────┐
                          │  2 · read existing domains    current state       │
                          │      identity = libvirt metadata (serverId),      │
                          │      not the VM name                              │
                          └────────────────────────┬─────────────────────────┘
-                                                   ▼
+                                                  ▼
                          ┌──────────────────────────────────────────────────┐
                          │  3 · plan  =  desired △ current                   │
                          │      + create     ~ update     - delete           │
                          └────────────────────────┬─────────────────────────┘
-                          --plan stops here ◀──────┤
-                                                   │  else: 10s confirm window
-                                                   ▼
+                          --plan stops here ◀─────┤
+                                                  │  else: 10s confirm window
+                                                  ▼
                          ┌──────────────────────────────────────────────────┐
                          │  4 · apply (per host)                             │
                          │      delete ▸ update ▸ clone disk ▸ define & boot │
                          └────────────────────────┬─────────────────────────┘
-                                                   ▼   SMBIOS serial
+                                                  ▼   SMBIOS serial
                                        ds=nocloud;s=<metaUrl><name>/
-                                                   │
-                                                   ▼
+                                                  │
+                                                  ▼
                          ┌──────────────────────────────────────────────────┐
                          │  CloudInitServer   HTTP :8080/cloud-init/         │
                          │  serves  user-data · meta-data · network-config   │
