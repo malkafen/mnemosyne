@@ -39,8 +39,10 @@ class Mnemosyne {
     try {
       for (Mnemon m : mnemones) {
         m.setConnect();
-        m.plan(config.isJoin());
+        m.plan();
       }
+
+      for (Mnemon m : mnemones) m.printPlan(config.isJoin());
 
       if (config.isPlanOnly()) return;
       confirmWindow();

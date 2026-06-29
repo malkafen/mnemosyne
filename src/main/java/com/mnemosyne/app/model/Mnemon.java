@@ -136,7 +136,7 @@ public class Mnemon {
     log.debug("Mnemon '{}' go to bed", this.group);
   }
 
-  public void plan(boolean isJoin)
+  public void plan()
       throws LibvirtException, ParserConfigurationException, SAXException, IOException {
 
     List<DomainState> actual = new ArrayList<>();
@@ -145,6 +145,10 @@ public class Mnemon {
       actual.add(DomainInspector.readState(d.getXMLDesc(0)));
 
     plan = new Plan(actual, servers);
+  }
+
+  public void printPlan(boolean isJoin) {
+    if (plan == null) throw new IllegalStateException("printPlan() called before plan was built");
     plan.print(group, isJoin);
   }
 
