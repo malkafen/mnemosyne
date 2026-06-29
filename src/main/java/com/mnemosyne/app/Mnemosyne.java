@@ -90,7 +90,6 @@ class Mnemosyne {
 
   private void shutdown() {
     for (Mnemon m : mnemones) {
-      m.freeDomains();
       try {
         m.closeConnect();
       } catch (LibvirtException e) {
