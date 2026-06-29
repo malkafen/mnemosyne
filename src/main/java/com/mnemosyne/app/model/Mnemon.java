@@ -66,8 +66,6 @@ public class Mnemon {
 
   private static final Logger log = LoggerFactory.getLogger(Mnemon.class);
 
-  // A static factory: it builds objects, holds no instance state.
-
   public static List<Mnemon> loadMnemones(Config config) throws IOException {
     String path = config.getServersPath();
     log.debug("Loading servers from {}", path);
@@ -342,31 +340,33 @@ public class Mnemon {
       }
       enrichServerStatus(s);
       if (s.getStatus() == Status.NEW) {
+        Domain d = null;
         try {
           log.debug("Trying to generate cloud-configs for server '{}'", s.getName());
           setupCloudInit(s);
           log.debug("Cloud-configs successfully generated for server '{}'", s.getName());
 
           log.debug("Trying to define domain for server '{}'", s.getName());
-          defineDomain(s);
+          d = defineDomain(s);
           log.debug("Domain successfully defined for server '{}'", s.getName());
 
           log.debug("Trying to create domain for server '{}'", s.getName());
-          createDomain(s);
+          createDomain(s, d);
           log.debug("Domain successfully created for server '{}'", s.getName());
         } catch (Exception e) {
           log.error("Failed to setup server '{}': {}", s.getName(), e.getMessage());
           continue;
+        } finally {
+          if (d != null) freeDomainQuietly(d);
         }
       }
     }
   }
 
   private void enrichServerStatus(Server s) {
-    Domain domain = null;
+    Domain d = null;
     try {
-      domain = connect.domainLookupByName(s.getName());
-      s.setDomain(domain);
+      d = connect.domainLookupByName(s.getName());
       s.setStatus(Status.DOMAIN_ASSIGNED);
       log.debug("Domain '{}' already exists, assigning to server", s.getName());
     } catch (LibvirtException e) {
@@ -382,6 +382,8 @@ public class Mnemon {
             virError.getCode(),
             e);
       }
+    } finally {
+      if (d != null) freeDomainQuietly(d);
     }
   }
 
@@ -398,14 +400,13 @@ public class Mnemon {
     }
   }
 
-  private void defineDomain(Server s) throws Exception {
-    Domain domain = null;
+  private Domain defineDomain(Server s) throws Exception {
     try {
       String serverDesc = s.buildServerXml();
       log.trace("Domain XML for server '{}': {}", s.getName(), serverDesc);
-      domain = connect.domainDefineXML(serverDesc);
-      s.setDomain(domain);
+      Domain d = connect.domainDefineXML(serverDesc);
       s.setStatus(Status.DOMAIN_ASSIGNED);
+      return d;
     } catch (LibvirtException e) {
       log.error(
           "Libvirt operation failed when define for server '{}' (code: {})",
@@ -419,13 +420,13 @@ public class Mnemon {
     }
   }
 
-  private void createDomain(Server s) throws Exception {
+  private void createDomain(Server s, Domain d) throws Exception {
     try {
-      s.getDomain().create();
+      d.create();
       log.debug("Creating domain '{}'...", s.getName());
 
       int attempts = 0;
-      while (s.getDomain().isActive() != 1) {
+      while (d.isActive() != 1) {
         log.debug(
             "Domain '{}' is not active yet, waiting... (attempt #{})", s.getName(), ++attempts);
         try {
@@ -569,21 +570,6 @@ public class Mnemon {
       d.free();
     } catch (LibvirtException e) {
       log.debug("Failed to free domain handle (domain cleanup); ignoring", e);
-    }
-  }
-
-  public void freeDomains() {
-    for (Server s : servers.values()) {
-      if (s.getDomain() == null) continue;
-      log.debug("Attempting to free domain '{}'...", s.getName());
-      try {
-        log.debug("Freeing domain '{}'...", s.getName());
-        s.getDomain().free();
-      } catch (LibvirtException e) {
-        s.setStatus(Status.ERROR);
-        log.error("Failed to free domain '{}': {}", s.getName(), e.getMessage(), e);
-        continue;
-      }
     }
   }
 

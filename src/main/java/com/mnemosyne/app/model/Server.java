@@ -17,7 +17,6 @@ import javax.xml.transform.dom.DOMSource;
 import javax.xml.transform.stream.StreamResult;
 import lombok.Getter;
 import lombok.Setter;
-import org.libvirt.Domain;
 import org.w3c.dom.Document;
 import org.w3c.dom.Element;
 import org.w3c.dom.NodeList;
@@ -64,8 +63,6 @@ public class Server {
 
   @NotBlank(message = "Storage pool name is required")
   private String pool = "default";
-
-  private Domain domain = null;
 
   private Templates templates;
 
