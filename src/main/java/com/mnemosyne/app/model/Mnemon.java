@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.dataformat.yaml.YAMLFactory;
 import com.mnemosyne.app.config.*;
 import com.mnemosyne.app.http.*;
+import com.mnemosyne.app.libvirt.Hypervisor;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.*;
 import java.io.File;
@@ -17,11 +18,9 @@ import lombok.Setter;
 import org.libvirt.Connect;
 import org.libvirt.Domain;
 import org.libvirt.Error;
-import org.libvirt.ErrorCallback;
 import org.libvirt.LibvirtException;
 import org.libvirt.StoragePool;
 import org.libvirt.StorageVol;
-import org.libvirt.jna.virError;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.xml.sax.SAXException;
@@ -101,26 +100,8 @@ public class Mnemon {
 
   // Connection lifecycle
 
-  public void setConnect() throws Exception {
-    File keyFile = new File(this.key);
-    log.debug("Resolving SSH key for group '{}': '{}'", this.group, this.key);
-    if (!keyFile.exists() || !keyFile.isFile()) {
-      throw new IOException(
-          String.format("SSH key file not found '%s' for mnemon '%s'", this.key, this.group));
-    }
-    String uri =
-        String.format("qemu+ssh://%s@%s:%d/system?keyfile=%s&no_verify=1", user, host, port, key);
-    log.debug("Connecting to hypervisor '{}' via '{}'", this.group, uri);
-
-    Connect connect = new Connect(uri);
-    // disable native C logging
-    connect.setConnectionErrorCallback(
-        new ErrorCallback() {
-          public void errorCallback(Object userData, virError error) {}
-        });
-
-    this.connect = connect;
-    log.info("Connection to '{}' was successful.", this.group);
+  public void setConnect() throws LibvirtException, IOException {
+    this.connect = Hypervisor.connect(this.user, this.key, this.host, this.port);
     log.debug("Mnemon '{}' connected to host '{}'", this.group, this.host);
   }
 
