@@ -1,22 +1,24 @@
 package com.mnemosyne.app.libvirt;
 
+import java.util.List;
+import org.libvirt.Connect;
 import org.libvirt.Domain;
 import org.libvirt.LibvirtException;
-import org.libvirt.Connect;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import java.util.List;
 
 class DomainOps {
 
-  private static final Logger log = LoggerFactory.getLogger(DomainOps.class); 
+  private static final Logger log = LoggerFactory.getLogger(DomainOps.class);
   private final Connect connect;
 
-  public DomainOps(Connect connect){ this.connect = connect; }
+  public DomainOps(Connect connect) {
+    this.connect = connect;
+  }
 
   public void delete(List<String> toDelete) {
     for (String name : toDelete) {
-        Domain d = null;
+      Domain d = null;
       try {
         d = connect.domainLookupByName(name);
         destroyDomain(d, name);
@@ -54,13 +56,11 @@ class DomainOps {
     }
   }
 
-    private static void freeDomainQuietly(Domain d) {
+  private static void freeDomainQuietly(Domain d) {
     try {
       d.free();
     } catch (LibvirtException e) {
       log.debug("Failed to free domain handle (domain cleanup); ignoring", e);
     }
   }
-
-
 }

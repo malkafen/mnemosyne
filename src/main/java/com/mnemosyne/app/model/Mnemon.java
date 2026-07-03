@@ -133,10 +133,10 @@ public class Mnemon {
 
   public void apply() throws Exception {
     // reconcile();
-    
-    //update();
-    //createStorage();
-    //setupDomain();
+
+    // update();
+    // createStorage();
+    // setupDomain();
   }
 
   public void update() throws LibvirtException {
