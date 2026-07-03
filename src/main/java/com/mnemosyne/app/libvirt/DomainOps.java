@@ -7,7 +7,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import java.util.List;
 
-public class DomainOps {
+class DomainOps {
 
   private static final Logger log = LoggerFactory.getLogger(DomainOps.class); 
   private final Connect connect;

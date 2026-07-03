@@ -4,7 +4,6 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.dataformat.yaml.YAMLFactory;
 import com.mnemosyne.app.config.*;
 import com.mnemosyne.app.http.*;
-import com.mnemosyne.app.libvirt.DomainOps;
 import com.mnemosyne.app.libvirt.Hypervisor;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.*;
@@ -134,12 +133,10 @@ public class Mnemon {
 
   public void apply() throws Exception {
     // reconcile();
-    DomainOps domainOps = new DomainOps(connect);
-    domainOps.delete(plan.getToDelete());
     
-    update();
-    createStorage();
-    setupDomain();
+    //update();
+    //createStorage();
+    //setupDomain();
   }
 
   public void update() throws LibvirtException {
