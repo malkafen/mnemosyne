@@ -100,11 +100,6 @@ public class Mnemon {
 
   // Connection lifecycle
 
-  public void setConnect() throws LibvirtException, IOException {
-    this.connect = Hypervisor.connect(this.user, this.key, this.host, this.port);
-    log.debug("Mnemon '{}' connected to host '{}'", this.group, this.host);
-  }
-
   public void closeConnect() throws LibvirtException {
     if (connect == null) {
       log.debug("Mnemon '{}' has no active connection, nothing to close", this.group);

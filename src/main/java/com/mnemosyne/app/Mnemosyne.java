@@ -2,6 +2,7 @@ package com.mnemosyne.app;
 
 import com.mnemosyne.app.config.*;
 import com.mnemosyne.app.http.*;
+import com.mnemosyne.app.libvirt.Hypervisor;
 import com.mnemosyne.app.model.*;
 import jakarta.validation.*;
 import java.util.Comparator;
@@ -11,6 +12,7 @@ import java.util.stream.Collectors;
 import org.libvirt.LibvirtException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.libvirt.Connect;
 
 class Mnemosyne {
 
@@ -38,7 +40,7 @@ class Mnemosyne {
     CloudInitServer.start();
     try {
       for (Mnemon m : mnemones) {
-        m.setConnect();
+        Connect c = Hypervisor.connect(m.getUser(), m.getKey(), m.getHost() , m.getPort());
         m.plan();
       }
 
