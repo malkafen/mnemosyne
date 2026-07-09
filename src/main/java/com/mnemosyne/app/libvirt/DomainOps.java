@@ -1,5 +1,8 @@
 package com.mnemosyne.app.libvirt;
 
+import com.mnemosyne.app.model.DomainState;
+import com.mnemosyne.app.utils.XmlUtil;
+import java.util.ArrayList;
 import java.util.List;
 import org.libvirt.Connect;
 import org.libvirt.Domain;
@@ -16,7 +19,7 @@ class DomainOps {
     this.connect = connect;
   }
 
-  public void delete(List<String> toDelete) {
+  void delete(List<String> toDelete) {
     for (String name : toDelete) {
       Domain d = null;
       try {
@@ -61,6 +64,17 @@ class DomainOps {
       d.free();
     } catch (LibvirtException e) {
       log.debug("Failed to free domain handle (domain cleanup); ignoring", e);
+    }
+  }
+
+  public List<DomainState> readActualState() throws LibvirtException {
+    Domain[] domains = connect.listAllDomains(0);
+    try {
+      List<DomainState> actual = new ArrayList<>(domains.length);
+      for (Domain d : domains) actual.add(XmlUtil.getShortState(d.getXMLDesc(0)));
+      return actual;
+    } finally {
+      for (Domain d : domains) freeDomainQuietly(d);
     }
   }
 }

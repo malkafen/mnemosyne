@@ -4,7 +4,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.dataformat.yaml.YAMLFactory;
 import com.mnemosyne.app.config.*;
 import com.mnemosyne.app.http.*;
-import com.mnemosyne.app.libvirt.Hypervisor;
+import com.mnemosyne.app.libvirt.Harmonia;
+
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.*;
 import java.io.File;
@@ -62,6 +63,8 @@ public class Mnemon {
   private Map<String, Server> servers;
 
   private Plan plan;
+
+  private Harmonia harmonia;
 
   private static final Logger log = LoggerFactory.getLogger(Mnemon.class);
 

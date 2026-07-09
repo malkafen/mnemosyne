@@ -2,17 +2,15 @@ package com.mnemosyne.app;
 
 import com.mnemosyne.app.config.*;
 import com.mnemosyne.app.http.*;
-import com.mnemosyne.app.libvirt.Hypervisor;
+import com.mnemosyne.app.libvirt.Harmonia;
 import com.mnemosyne.app.model.*;
 import jakarta.validation.*;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Set;
 import java.util.stream.Collectors;
-import org.libvirt.LibvirtException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.libvirt.Connect;
 
 class Mnemosyne {
 
@@ -40,8 +38,9 @@ class Mnemosyne {
     CloudInitServer.start();
     try {
       for (Mnemon m : mnemones) {
-        Connect c = Hypervisor.connect(m.getUser(), m.getKey(), m.getHost() , m.getPort());
-        m.plan();
+        Harmonia h = new Harmonia(m.getUser(), m.getKey(), m.getHost(), m.getPort());
+        m.setHarmonia(h);
+        m.setPlan(h.plan(m.getServers()));
       }
 
       for (Mnemon m : mnemones) m.printPlan(config.isJoin());
@@ -91,16 +90,25 @@ class Mnemosyne {
   }
 
   private void shutdown() {
+    log.debug("Shutting down {} mnemones...", mnemones.size());
     for (Mnemon m : mnemones) {
+      Harmonia h = m.getHarmonia();
+      if (h == null) {
+        log.debug("Mnemon '{}' has no Harmonia instance, skipping", m.getGroup());
+        continue;
+      }
       try {
-        m.closeConnect();
-      } catch (LibvirtException e) {
+        log.debug("Closing connection for mnemon '{}'...", m.getGroup());
+        h.close();
+        log.debug("Mnemon '{}' closed successfully", m.getGroup());
+      } catch (Exception e) {
         log.error(
             "Failed to close connection for mnemon '{}': {}", m.getGroup(), e.getMessage(), e);
       }
     }
     log.debug("Stopping CloudInitServer...");
     CloudInitServer.stop();
+    log.debug("CloudInitServer stopped");
   }
   // EndClass
 }
