@@ -49,7 +49,7 @@ public class XmlUtil {
     return (s == null || s.isBlank()) ? null : s.trim();
   }
 
-  static final String MNEM_NS = "https://mnemosyne.dev/schema/v1";
+  public static final String MNEM_NS = "https://mnemosyne.dev/schema/v1";
 
   public static DomainState getShortState(String domainXml) {
 

@@ -42,7 +42,7 @@ class Mnemosyne {
     CloudInitServer.start();
     try {
       for (Mnemon m : mnemones) {
-        Harmonia h = new Harmonia(m.getUser(), m.getKey(), m.getHost(), m.getPort());
+        Harmonia h = new Harmonia(m.getGroup(), m.getUser(), m.getKey(), m.getHost(), m.getPort());
         irides.add(new Iris(m, h));
       }
 
@@ -53,9 +53,9 @@ class Mnemosyne {
       if (config.isPlanOnly()) return;
       confirmWindow();
 
-      for (Mnemon m : mnemones) {
-        if (config.isJoin()) m.join();
-        else m.apply();
+      for (Iris i : irides) {
+        if (config.isJoin()) i.harmonia.join(i.mnemon.getServers()); // <----- we are here
+        // else m.apply();
       }
       log.info("All {} mnemones provisioned. Waiting cloud-init is done...", mnemones.size());
       CloudInitServer.waitForCloudInit().get();
@@ -90,7 +90,7 @@ class Mnemosyne {
   }
 
   private void confirmWindow() throws InterruptedException {
-    System.out.printf("%nApplying in %ds — Ctrl+C to abort...%n", CONFIRM_DELAY_MS / 1000);
+    System.out.printf("Applying in %ds — Ctrl+C to abort...%n", CONFIRM_DELAY_MS / 1000);
     Thread.sleep(CONFIRM_DELAY_MS);
   }
 

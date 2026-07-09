@@ -1,6 +1,7 @@
 package com.mnemosyne.app.libvirt;
 
 import com.mnemosyne.app.model.DomainState;
+import com.mnemosyne.app.model.Server;
 import com.mnemosyne.app.utils.XmlUtil;
 import java.util.ArrayList;
 import java.util.List;
@@ -75,6 +76,32 @@ class DomainOps {
       return actual;
     } finally {
       for (Domain d : domains) freeDomainQuietly(d);
+    }
+  }
+
+  boolean joinDomain(String group, String name, Server s) {
+    Domain d = null;
+    try {
+      d = connect.domainLookupByName(name);
+
+      int flags =
+          (d.isActive() == 1)
+              ? Domain.ModificationImpact.CONFIG | Domain.ModificationImpact.LIVE
+              : Domain.ModificationImpact.CONFIG;
+
+      d.setMetadata(
+          Domain.MetadataType.ELEMENT,
+          s.buildMnemosyneMetadataXml(),
+          "mnem",
+          XmlUtil.MNEM_NS,
+          flags);
+
+      return true;
+    } catch (LibvirtException e) {
+      log.error("Failed to join domain '{}' in group '{}': {}", name, group, e.getMessage(), e);
+      return false;
+    } finally {
+      if (d != null) freeDomainQuietly(d);
     }
   }
 }

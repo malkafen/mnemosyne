@@ -12,6 +12,7 @@ public final class Plan {
 
   private final Map<String, Server> toCreate;
   private final Map<String, String> toUpdate;
+  //private final Mapt<String, Server> toAdopt;
   private final List<String> toDelete;
   private final List<String> unmanaged;
 
@@ -51,13 +52,17 @@ public final class Plan {
             .toList();
 
     this.unmanaged = unmanagedD.values().stream().map(d -> d.name()).sorted().toList();
+
   }
 
-  public void print(String group, boolean printJoin) {
+  public void print(String group, boolean isJoin) {
     System.out.println();
-    if (printJoin) {
-      if (unmanaged.isEmpty()) return;
-      System.out.printf("[ %s ]  unmanaged (can be adopted): %d%n", group, unmanaged.size());
+    if (isJoin) {
+      if (unmanaged.isEmpty()) {
+        System.out.printf("[ %s ] no unmanaged domains%n%n", group);
+        return;
+      }
+      System.out.printf("[ %s ]  unmanaged (can be adopted): %d%n%n", group, unmanaged.size());
       unmanaged.forEach(n -> System.out.println("  > " + n));
       return;
     }
@@ -75,6 +80,7 @@ public final class Plan {
     toCreate.keySet().forEach(n -> System.out.println("  + " + n));
     toUpdate.forEach((id, diff) -> System.out.println("  ~ " + id + "  " + diff));
     toDelete.forEach(n -> System.out.println("  - " + n));
+    System.out.println();
   }
 
   private boolean specDrifted(Server s, DomainState d) {

@@ -4,6 +4,8 @@ import com.mnemosyne.app.model.DomainState;
 import com.mnemosyne.app.model.Plan;
 import com.mnemosyne.app.model.Server;
 import java.io.IOException;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import org.libvirt.Connect;
@@ -16,15 +18,17 @@ public class Harmonia implements AutoCloseable {
   private final DomainOps domainOps;
   private final StorageOps storageOps;
   private final Connect connect;
+  private final String group;
   private Plan plan;
   private static final Logger log = LoggerFactory.getLogger(Harmonia.class);
 
-  public Harmonia(String user, String key, String host, int port)
+  public Harmonia(String group, String user, String key, String host, int port)
       throws LibvirtException, IOException {
     Connect c = Hypervisor.connect(user, key, host, port);
     this.domainOps = new DomainOps(c);
     this.storageOps = new StorageOps(c);
     this.connect = c;
+    this.group = group;
   }
 
   @Override
@@ -38,6 +42,43 @@ public class Harmonia implements AutoCloseable {
     List<DomainState> actual = domainOps.readActualState();
     this.plan = new Plan(actual, servers);
     return this.plan;
+  }
+
+  public void join(Map<String, Server> servers) {
+    if (this.plan == null) {
+      log.debug("[ {} ] nothing to join (no plan)", group);
+      return;
+    }
+    if (this.plan.getUnmanaged().isEmpty()) {
+      log.debug("[ {} ] nothing to join", group);
+      return;
+    }
+
+    List<String> joined = new ArrayList<>();
+    Map<String, String> skipped = new LinkedHashMap<>();
+
+    for (String name : this.plan.getUnmanaged()) {
+      Server match =
+          servers.values().stream().filter(s -> name.equals(s.getName())).findFirst().orElse(null);
+
+      if (match == null) {
+        skipped.put(name, "not found in servers file");
+        continue;
+      }
+
+      if (domainOps.joinDomain(group, name, match)) joined.add(name);
+      else skipped.put(name, "join failed (see log)");
+    }
+
+    if (joined.isEmpty()) {
+      System.out.printf("%n[ %s ]  nothing joined, skipped: %d%n", group, skipped.size());
+    } else {
+      System.out.printf(
+          "%n[ %s ]  joined: %d, skipped: %d%n", group, joined.size(), skipped.size());
+    }
+    joined.forEach(n -> System.out.println("  + " + n));
+    skipped.forEach((n, reason) -> System.out.printf("  · %s  (%s)%n", n, reason));
+    System.out.println();
   }
 
   public void reconcile() {
