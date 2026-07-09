@@ -12,7 +12,7 @@ public final class Plan {
 
   private final Map<String, Server> toCreate;
   private final Map<String, String> toUpdate;
-  //private final Mapt<String, Server> toAdopt;
+  private final Map<String, Server> toAdopt;
   private final List<String> toDelete;
   private final List<String> unmanaged;
 
@@ -51,8 +51,14 @@ public final class Plan {
             .sorted()
             .toList();
 
-    this.unmanaged = unmanagedD.values().stream().map(d -> d.name()).sorted().toList();
+    this.toAdopt =
+        unmanagedD.values().stream()
+            .filter(d -> servers.containsKey(d.serverId()))
+            .collect(
+                Collectors.toMap(
+                    d -> d.serverId(), d -> servers.get(d.serverId()), (a, b) -> a, TreeMap::new));
 
+    this.unmanaged = unmanagedD.values().stream().map(d -> d.name()).sorted().toList();
   }
 
   public void print(String group, boolean isJoin) {

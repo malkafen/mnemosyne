@@ -120,11 +120,6 @@ public class Mnemon {
     plan = new Plan(actual, servers);
   }
 
-  public void printPlan(boolean isJoin) {
-    if (plan == null) throw new IllegalStateException("printPlan() called before plan was built");
-    plan.print(group, isJoin);
-  }
-
   public void apply() throws Exception {
     // reconcile();
 
@@ -546,67 +541,6 @@ public class Mnemon {
       d.free();
     } catch (LibvirtException e) {
       log.debug("Failed to free domain handle (domain cleanup); ignoring", e);
-    }
-  }
-
-  public void join() {
-    if (plan == null) {
-      System.out.printf("[ %s ]  nothing to join (no plan)%n", group);
-      return;
-    }
-
-    List<String> joined = new ArrayList<>();
-    List<String> skipped = new ArrayList<>();
-
-    for (String name : plan.getUnmanaged()) {
-      Server match =
-          servers.values().stream()
-              .filter(s -> name.equals(s.getName()))
-              .findFirst()
-              .orElse(null); // serverByName(name);
-
-      if (match == null) {
-        skipped.add(name); // нет matching server spec
-        continue;
-      }
-      if (joinDomain(name, match)) joined.add(name);
-      else skipped.add(name);
-    }
-
-    if (joined.isEmpty()) {
-      System.out.printf("%n[ %s ]  nothing joined (skipped: %d)%n", group, skipped.size());
-    } else {
-      System.out.printf(
-          "%n[ %s ]  joined: %d (skipped: %d)%n", group, joined.size(), skipped.size());
-    }
-    joined.forEach(n -> System.out.println("  + " + n));
-    skipped.forEach(n -> System.out.println("  · " + n));
-    System.out.println();
-  }
-
-  private boolean joinDomain(String name, Server s) {
-    Domain d = null;
-    try {
-      d = connect.domainLookupByName(name);
-
-      int flags =
-          (d.isActive() == 1)
-              ? Domain.ModificationImpact.CONFIG | Domain.ModificationImpact.LIVE
-              : Domain.ModificationImpact.CONFIG;
-
-      d.setMetadata(
-          Domain.MetadataType.ELEMENT,
-          s.buildMnemosyneMetadataXml(),
-          "mnem",
-          DomainInspector.MNEM_NS,
-          flags);
-
-      return true;
-    } catch (LibvirtException e) {
-      log.error("Failed to join domain '{}' in group '{}': {}", name, group, e.getMessage(), e);
-      return false;
-    } finally {
-      if (d != null) freeDomainQuietly(d);
     }
   }
 

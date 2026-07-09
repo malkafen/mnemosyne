@@ -44,7 +44,7 @@ public class Harmonia implements AutoCloseable {
     return this.plan;
   }
 
-  public void join(Map<String, Server> servers) {
+  public void join() {
     if (this.plan == null) {
       log.debug("[ {} ] nothing to join (no plan)", group);
       return;
@@ -57,17 +57,10 @@ public class Harmonia implements AutoCloseable {
     List<String> joined = new ArrayList<>();
     Map<String, String> skipped = new LinkedHashMap<>();
 
-    for (String name : this.plan.getUnmanaged()) {
-      Server match =
-          servers.values().stream().filter(s -> name.equals(s.getName())).findFirst().orElse(null);
+    for (Server s : this.plan.getToAdopt().values()) {
 
-      if (match == null) {
-        skipped.put(name, "not found in servers file");
-        continue;
-      }
-
-      if (domainOps.joinDomain(group, name, match)) joined.add(name);
-      else skipped.put(name, "join failed (see log)");
+      if (domainOps.joinDomain(group, s)) joined.add(s.getId());
+      else skipped.put(s.getId(), "join failed (see log)");
     }
 
     if (joined.isEmpty()) {

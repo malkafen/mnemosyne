@@ -79,10 +79,10 @@ class DomainOps {
     }
   }
 
-  boolean joinDomain(String group, String name, Server s) {
+  boolean joinDomain(String group, Server s) {
     Domain d = null;
     try {
-      d = connect.domainLookupByName(name);
+      d = connect.domainLookupByName(s.getId());
 
       int flags =
           (d.isActive() == 1)
@@ -98,7 +98,8 @@ class DomainOps {
 
       return true;
     } catch (LibvirtException e) {
-      log.error("Failed to join domain '{}' in group '{}': {}", name, group, e.getMessage(), e);
+      log.error(
+          "Failed to join domain '{}' in group '{}': {}", s.getId(), group, e.getMessage(), e);
       return false;
     } finally {
       if (d != null) freeDomainQuietly(d);
