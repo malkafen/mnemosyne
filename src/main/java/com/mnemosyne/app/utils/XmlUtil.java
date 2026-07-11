@@ -4,6 +4,8 @@ import com.mnemosyne.app.exception.*;
 import com.mnemosyne.app.model.DomainState;
 import java.io.IOException;
 import java.io.StringReader;
+import java.util.ArrayList;
+import java.util.List;
 import javax.xml.XMLConstants;
 import javax.xml.parsers.DocumentBuilder;
 import javax.xml.parsers.DocumentBuilderFactory;
@@ -73,6 +75,32 @@ public class XmlUtil {
           // textNS(meta, MNEM_NS, "specHash"),
           textNS(meta, MNEM_NS, "specVersion"),
           textNS(meta, MNEM_NS, "managedBy"));
+    } catch (ParserConfigurationException | SAXException | IOException e) {
+      throw new XmlParseException("Failed to parse domain XML", e);
+    }
+  }
+
+  public static List<String> diskPaths(String domainXml) {
+    try {
+      Document doc = parse(domainXml);
+      List<String> paths = new ArrayList<>();
+
+      NodeList disks = doc.getElementsByTagName("disk");
+      for (int i = 0; i < disks.getLength(); i++) {
+        Element disk = (Element) disks.item(i);
+        if (!"disk".equals(disk.getAttribute("device"))) {
+          continue;
+        }
+        Element source = (Element) disk.getElementsByTagName("source").item(0);
+        if (source == null) {
+          continue;
+        }
+        String file = source.getAttribute("file");
+        if (!file.isBlank()) {
+          paths.add(file);
+        }
+      }
+      return paths;
     } catch (ParserConfigurationException | SAXException | IOException e) {
       throw new XmlParseException("Failed to parse domain XML", e);
     }

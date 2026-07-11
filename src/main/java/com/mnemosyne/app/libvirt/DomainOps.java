@@ -8,6 +8,7 @@ import java.util.List;
 import org.libvirt.Connect;
 import org.libvirt.Domain;
 import org.libvirt.LibvirtException;
+import org.libvirt.StorageVol;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -20,23 +21,8 @@ class DomainOps {
     this.connect = connect;
   }
 
-  void delete(List<String> toDelete) {
-    for (String name : toDelete) {
-      Domain d = null;
-      try {
-        d = connect.domainLookupByName(name);
-        destroyDomain(d, name);
-        undefineDomain(d, name);
-      } catch (Exception e) {
-        log.error("Domain '{}' will be skipping..", name, e);
-        continue;
-      } finally {
-        if (d != null) freeDomainQuietly(d);
-      }
-    }
-  }
-
-  private static void destroyDomain(Domain d, String name) throws LibvirtException {
+  void destroyDomain(String name) throws LibvirtException {
+    Domain d = connect.domainLookupByName(name);
     try {
       if (d.isActive() == 1) {
         log.debug("Domain '{}' is active, destroying...", name);
@@ -104,5 +90,19 @@ class DomainOps {
     } finally {
       if (d != null) freeDomainQuietly(d);
     }
+  }
+
+  List<StorageVol> getVolumes(String name) throws LibvirtException {
+    Domain d = connect.domainLookupByName(name);
+    final List<String> diskPaths;
+    String domainXml = d.getXMLDesc(0);
+    diskPaths = XmlUtil.diskPaths(domainXml);
+    if (diskPaths.isEmpty()) {
+      log.debug("Domain '{}' has no file-backed disk paths", name);
+      return List.of();
+    }
+    List <StorageVol> volumes = new ArrayList<>(diskPaths.size());
+    for (String path : diskPaths) volumes.add(connect.storageVolLookupByPath(path));
+    return volumes;
   }
 }
