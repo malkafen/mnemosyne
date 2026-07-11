@@ -87,6 +87,7 @@ public class Harmonia implements AutoCloseable {
     for (String name : plan.getToDelete()) {
       List<StorageVol> volumes = domainOps.getVolumes(name);
       domainOps.destroyDomain(name);
+      domainOps.undefineDomain(name);
     }
   }
 }

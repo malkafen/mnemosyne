@@ -22,6 +22,7 @@ class DomainOps {
   }
 
   void destroyDomain(String name) throws LibvirtException {
+    log.debug("Destroying domain '{}'...", name);
     Domain d = connect.domainLookupByName(name);
     try {
       if (d.isActive() == 1) {
@@ -32,17 +33,22 @@ class DomainOps {
     } catch (LibvirtException e) {
       log.error("Failed to destroy domain '{}'", name, e);
       throw e;
+    } finally {
+      freeDomainQuietly(d);
     }
   }
 
-  private static void undefineDomain(Domain d, String name) throws LibvirtException {
+  void undefineDomain(String name) throws LibvirtException {
     log.debug("Undefining domain '{}'...", name);
+    Domain d = connect.domainLookupByName(name);
     try {
       d.undefine();
       log.debug("Domain '{}' undefined successfully", name);
     } catch (LibvirtException e) {
       log.error("Failed to undefine domain '{}'", name, e);
       throw e;
+    } finally {
+      freeDomainQuietly(d);
     }
   }
 
@@ -101,7 +107,7 @@ class DomainOps {
       log.debug("Domain '{}' has no file-backed disk paths", name);
       return List.of();
     }
-    List <StorageVol> volumes = new ArrayList<>(diskPaths.size());
+    List<StorageVol> volumes = new ArrayList<>(diskPaths.size());
     for (String path : diskPaths) volumes.add(connect.storageVolLookupByPath(path));
     return volumes;
   }
