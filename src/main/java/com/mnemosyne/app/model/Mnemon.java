@@ -17,11 +17,9 @@ import lombok.Setter;
 import org.libvirt.Connect;
 import org.libvirt.Domain;
 import org.libvirt.Error;
-import org.libvirt.ErrorCallback;
 import org.libvirt.LibvirtException;
 import org.libvirt.StoragePool;
 import org.libvirt.StorageVol;
-import org.libvirt.jna.virError;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.xml.sax.SAXException;
@@ -101,29 +99,6 @@ public class Mnemon {
 
   // Connection lifecycle
 
-  public void setConnect() throws Exception {
-    File keyFile = new File(this.key);
-    log.debug("Resolving SSH key for group '{}': '{}'", this.group, this.key);
-    if (!keyFile.exists() || !keyFile.isFile()) {
-      throw new IOException(
-          String.format("SSH key file not found '%s' for mnemon '%s'", this.key, this.group));
-    }
-    String uri =
-        String.format("qemu+ssh://%s@%s:%d/system?keyfile=%s&no_verify=1", user, host, port, key);
-    log.debug("Connecting to hypervisor '{}' via '{}'", this.group, uri);
-
-    Connect connect = new Connect(uri);
-    // disable native C logging
-    connect.setConnectionErrorCallback(
-        new ErrorCallback() {
-          public void errorCallback(Object userData, virError error) {}
-        });
-
-    this.connect = connect;
-    log.info("Connection to '{}' was successful.", this.group);
-    log.debug("Mnemon '{}' connected to host '{}'", this.group, this.host);
-  }
-
   public void closeConnect() throws LibvirtException {
     if (connect == null) {
       log.debug("Mnemon '{}' has no active connection, nothing to close", this.group);
@@ -145,16 +120,12 @@ public class Mnemon {
     plan = new Plan(actual, servers);
   }
 
-  public void printPlan(boolean isJoin) {
-    if (plan == null) throw new IllegalStateException("printPlan() called before plan was built");
-    plan.print(group, isJoin);
-  }
-
   public void apply() throws Exception {
-    reconcile();
-    update();
-    createStorage();
-    setupDomain();
+    // reconcile();
+
+    // update();
+    // createStorage();
+    // setupDomain();
   }
 
   public void update() throws LibvirtException {
@@ -570,67 +541,6 @@ public class Mnemon {
       d.free();
     } catch (LibvirtException e) {
       log.debug("Failed to free domain handle (domain cleanup); ignoring", e);
-    }
-  }
-
-  public void join() {
-    if (plan == null) {
-      System.out.printf("[ %s ]  nothing to join (no plan)%n", group);
-      return;
-    }
-
-    List<String> joined = new ArrayList<>();
-    List<String> skipped = new ArrayList<>();
-
-    for (String name : plan.getUnmanaged()) {
-      Server match =
-          servers.values().stream()
-              .filter(s -> name.equals(s.getName()))
-              .findFirst()
-              .orElse(null); // serverByName(name);
-
-      if (match == null) {
-        skipped.add(name); // нет matching server spec
-        continue;
-      }
-      if (joinDomain(name, match)) joined.add(name);
-      else skipped.add(name);
-    }
-
-    if (joined.isEmpty()) {
-      System.out.printf("%n[ %s ]  nothing joined (skipped: %d)%n", group, skipped.size());
-    } else {
-      System.out.printf(
-          "%n[ %s ]  joined: %d (skipped: %d)%n", group, joined.size(), skipped.size());
-    }
-    joined.forEach(n -> System.out.println("  + " + n));
-    skipped.forEach(n -> System.out.println("  · " + n));
-    System.out.println();
-  }
-
-  private boolean joinDomain(String name, Server s) {
-    Domain d = null;
-    try {
-      d = connect.domainLookupByName(name);
-
-      int flags =
-          (d.isActive() == 1)
-              ? Domain.ModificationImpact.CONFIG | Domain.ModificationImpact.LIVE
-              : Domain.ModificationImpact.CONFIG;
-
-      d.setMetadata(
-          Domain.MetadataType.ELEMENT,
-          s.buildMnemosyneMetadataXml(),
-          "mnem",
-          DomainInspector.MNEM_NS,
-          flags);
-
-      return true;
-    } catch (LibvirtException e) {
-      log.error("Failed to join domain '{}' in group '{}': {}", name, group, e.getMessage(), e);
-      return false;
-    } finally {
-      if (d != null) freeDomainQuietly(d);
     }
   }
 
