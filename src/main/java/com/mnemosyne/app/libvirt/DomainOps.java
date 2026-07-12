@@ -101,8 +101,16 @@ class DomainOps {
   List<StorageVol> getVolumes(String name) throws LibvirtException {
     Domain d = connect.domainLookupByName(name);
     final List<String> diskPaths;
-    String domainXml = d.getXMLDesc(0);
-    diskPaths = XmlUtil.diskPaths(domainXml);
+    try {
+      String domainXml = d.getXMLDesc(0);
+      diskPaths = XmlUtil.diskPaths(domainXml);
+    } catch (LibvirtException e) {
+      log.error("Failed to get XML description for domain '{}'", name, e);
+      throw e;
+    } finally {
+      if (d != null) freeDomainQuietly(d);
+    }
+
     if (diskPaths.isEmpty()) {
       log.debug("Domain '{}' has no file-backed disk paths", name);
       return List.of();

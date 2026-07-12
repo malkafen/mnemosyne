@@ -1,8 +1,8 @@
 package com.mnemosyne.app.libvirt;
 
-import org.libvirt.Connect;
 import com.mnemosyne.app.exception.*;
 import java.util.List;
+import org.libvirt.Connect;
 import org.libvirt.LibvirtException;
 import org.libvirt.StorageVol;
 import org.slf4j.Logger;
@@ -43,6 +43,16 @@ class StorageOps {
               "Failed to delete %d of %d volumes for domain '%s'", failed, deleted + failed, name));
     } else {
       log.debug("Volume cleanup for domain '{}': {} deleted", name, deleted);
+    }
+  }
+
+  void freeVolumesQuietly(List<StorageVol> volumes) {
+    if (volumes == null || volumes.isEmpty()) {
+      return;
+    }
+    for (StorageVol vol : volumes) {
+      if (vol == null) continue;
+      freeVolumeQuietly(vol);
     }
   }
 

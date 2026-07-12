@@ -76,6 +76,10 @@ public class Harmonia implements AutoCloseable {
   }
 
   public void reconcile() throws LibvirtException {
+    if (this.plan == null) {
+      log.debug("[ {} ] nothing to reconcile (no plan)", group);
+      return;
+    }
     delete();
     System.out.println("Delete " + plan.getToDelete());
     System.out.println("Create " + plan.getToCreate());
@@ -86,8 +90,13 @@ public class Harmonia implements AutoCloseable {
   private void delete() throws LibvirtException {
     for (String name : plan.getToDelete()) {
       List<StorageVol> volumes = domainOps.getVolumes(name);
-      domainOps.destroyDomain(name);
-      domainOps.undefineDomain(name);
+      try {
+        domainOps.destroyDomain(name);
+        domainOps.undefineDomain(name);
+      } catch (LibvirtException e) {
+        storageOps.freeVolumesQuietly(volumes);
+        throw e;
+      }
       storageOps.deleteVolumes(volumes, name);
     }
   }
