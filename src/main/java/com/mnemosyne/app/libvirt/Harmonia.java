@@ -81,9 +81,8 @@ public class Harmonia implements AutoCloseable {
       return;
     }
     delete();
-    System.out.println("Delete " + plan.getToDelete());
-    System.out.println("Create " + plan.getToCreate());
-    System.out.println("Update " + plan.getToUpdate());
+    update();
+    create();
   }
 
   // Reconcile methods
@@ -99,5 +98,13 @@ public class Harmonia implements AutoCloseable {
       }
       storageOps.deleteVolumes(volumes, name);
     }
+  }
+
+  private void update() throws LibvirtException {
+    System.out.println("Update " + plan.getToUpdate());
+  }
+
+  private void create() throws LibvirtException {
+    System.out.println("Create " + plan.getToCreate());
   }
 }
