@@ -81,12 +81,7 @@ class DomainOps {
               ? Domain.ModificationImpact.CONFIG | Domain.ModificationImpact.LIVE
               : Domain.ModificationImpact.CONFIG;
 
-      d.setMetadata(
-          Domain.MetadataType.ELEMENT,
-          metadata,
-          "mnem",
-          XmlUtil.MNEM_NS,
-          flags);
+      d.setMetadata(Domain.MetadataType.ELEMENT, metadata, "mnem", XmlUtil.MNEM_NS, flags);
 
       return true;
     } catch (LibvirtException e) {
