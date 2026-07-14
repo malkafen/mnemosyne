@@ -31,7 +31,6 @@ public class Server {
   private static final String IPV4_CIDR_PATTERN =
       "^((25[0-5]|2[0-4]\\d|[01]?\\d\\d?)\\.){3}(25[0-5]|2[0-4]\\d|[01]?\\d\\d?)/(3[0-2]|[12]?\\d)$";
 
-  @NotBlank(message = "Server name is required")
   private String name;
 
   @NotBlank(message = "Server id is required")
@@ -93,6 +92,10 @@ public class Server {
     this.status = status;
   }
 
+  public String getName() {
+    return (name == null || name.isBlank()) ? id : name;
+  }
+
   public String getSpecHash() {
     return specHash(this.cpu, this.ram);
   }
@@ -102,7 +105,7 @@ public class Server {
   public String buildVolumeXml()
       throws ParserConfigurationException, SAXException, IOException, TransformerException {
     Document doc = loadXmlTemplate(this.templates.getVolTmpl());
-    setElementText(doc, "name", this.name);
+    setElementText(doc, "name", getName());
     setElementText(doc, "capacity", String.valueOf(this.disk));
     return documentToString(doc);
   }
@@ -110,7 +113,7 @@ public class Server {
   public String buildServerXml()
       throws ParserConfigurationException, SAXException, IOException, TransformerException {
     Document doc = loadXmlTemplate(this.templates.getServerTmpl());
-    setElementText(doc, "name", this.name);
+    setElementText(doc, "name", getName());
     setElementText(doc, "memory", String.valueOf(this.ram));
     setElementText(doc, "vcpu", String.valueOf(this.cpu));
     setElementTextNS(doc, "https://mnemosyne.dev/schema/v1", "serverId", getId());
@@ -166,7 +169,7 @@ public class Server {
     for (int i = 0; i < entries.getLength(); i++) {
       Element entry = (Element) entries.item(i);
       if ("serial".equals(entry.getAttribute("name"))) {
-        entry.setTextContent("ds=nocloud;s=" + this.metaUrl + this.name + "/");
+        entry.setTextContent("ds=nocloud;s=" + this.metaUrl + getName() + "/");
         break;
       }
     }
@@ -202,8 +205,8 @@ public class Server {
 
   public String buildUserDataYaml() throws Exception {
     Map<String, Object> yaml = loadYamlTemplate(this.templates.getUserDataTmpl());
-    yaml.put("hostname", this.name);
-    yaml.put("fqdn", this.name);
+    yaml.put("hostname", getName());
+    yaml.put("fqdn", getName());
     /* Map<String, Object> network = (Map<String, Object>) yaml.get("network");
     Map<String, Object> ethernets = (Map<String, Object>) network.get("ethernets");
     Map<String, Object> enp1s0 = (Map<String, Object>) ethernets.get("enp1s0");
