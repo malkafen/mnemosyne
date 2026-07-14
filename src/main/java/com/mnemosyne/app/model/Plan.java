@@ -67,11 +67,10 @@ public final class Plan {
             .toList();
 
     this.toAdopt =
-        unmanagedD.values().stream()
-            .filter(d -> servers.containsKey(d.serverId()))
+        servers.entrySet().stream()
+            .filter(e -> unmanagedD.containsKey(e.getValue().getName()))
             .collect(
-                Collectors.toMap(
-                    d -> d.serverId(), d -> servers.get(d.serverId()), (a, b) -> a, TreeMap::new));
+                Collectors.toMap(e -> e.getKey(), e -> e.getValue(), (a, b) -> a, TreeMap::new));
 
     this.unmanaged = unmanagedD.values().stream().map(d -> d.name()).sorted().toList();
   }
