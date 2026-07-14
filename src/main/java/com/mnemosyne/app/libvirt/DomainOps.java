@@ -64,7 +64,8 @@ class DomainOps {
     Domain[] domains = connect.listAllDomains(0);
     try {
       List<DomainState> actual = new ArrayList<>(domains.length);
-      for (Domain d : domains) actual.add(XmlUtil.getShortState(d.getXMLDesc(0)));
+      for (Domain d : domains)
+        actual.add(XmlUtil.getShortState(d.getXMLDesc(Domain.XMLFlags.INACTIVE)));
       return actual;
     } finally {
       for (Domain d : domains) freeDomainQuietly(d);
@@ -118,5 +119,21 @@ class DomainOps {
     List<StorageVol> volumes = new ArrayList<>(diskPaths.size());
     for (String path : diskPaths) volumes.add(connect.storageVolLookupByPath(path));
     return volumes;
+  }
+
+  boolean updateCpu(String name, int cpu) throws LibvirtException {
+    Domain d = connect.domainLookupByName(name);
+    try {
+      log.debug("Domain '{}': setting vcpus to {} (config only)", name, cpu);
+      d.setVcpusFlags(cpu, Domain.VcpuFlags.CONFIG | Domain.VcpuFlags.MAXIMUM);
+      d.setVcpusFlags(cpu, Domain.VcpuFlags.CONFIG);
+      log.debug("Domain '{}': cpu updated (applies after restart)", name);
+      return true;
+    } catch (LibvirtException e) {
+      log.error("Failed to update cpu for domain '{}'", name);
+      throw e;
+    } finally {
+      freeDomainQuietly(d);
+    }
   }
 }

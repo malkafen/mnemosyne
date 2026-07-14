@@ -101,7 +101,21 @@ public class Harmonia implements AutoCloseable {
   }
 
   private void update() throws LibvirtException {
-    System.out.println("Update " + plan.getToUpdate());
+    Map<String, String> updated = new LinkedHashMap<>();
+    for (Plan.Update u : plan.getToUpdate().values()) {
+      if (u.cpuChanged())
+        if (domainOps.updateCpu(u.actual().name(), u.server().getCpu()))
+          updated.put(u.server().getId(), u.diff());
+    }
+
+    if (updated.isEmpty()) {
+      log.debug("[ {} ] nothing to update", group);
+      return;
+    }
+    System.out.printf(
+        "%n[ %s ]  updated: %d  (applies after domain restart)%n", group, updated.size());
+    updated.forEach((id, diff) -> System.out.printf("  ~ %s  (%s)%n", id, diff));
+    System.out.println();
   }
 
   private void create() throws LibvirtException {

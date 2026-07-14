@@ -54,8 +54,8 @@ class Mnemosyne {
       confirmWindow();
 
       for (Iris i : irides) {
-        if (config.isJoin()) i.harmonia.join(); // <----- we are here
-        else i.harmonia().reconcile();
+        if (config.isJoin()) i.harmonia.join();
+        else i.harmonia().reconcile(); // <----- we are here
       }
       log.info("All {} mnemones provisioned. Waiting cloud-init is done...", mnemones.size());
       CloudInitServer.waitForCloudInit().get();

@@ -10,9 +10,27 @@ import lombok.Getter;
 @Getter
 public final class Plan {
 
-  private final Map<String, Server> toCreate;
-  private final Map<String, String> toUpdate;
+  public record Update(Server server, DomainState actual) {
+    public boolean cpuChanged() {
+      return server.getCpu() != actual.cpu();
+    }
+
+    public boolean ramChanged() {
+      return server.getRam() != actual.ram();
+    }
+
+    public String diff() {
+      StringBuilder sb = new StringBuilder();
+      if (cpuChanged()) sb.append(String.format(" cpu %d->%d", actual.cpu(), server.getCpu()));
+      // RAM excluded from the plan output until libvirt-java ships setMemoryFlags:
+      // if (ramChanged()) sb.append(String.format(" ram %d->%d", actual.ram(), server.getRam()));
+      return sb.toString().trim();
+    }
+  }
+
   private final Map<String, Server> toAdopt;
+  private final Map<String, Update> toUpdate;
+  private final Map<String, Server> toCreate;
   private final List<String> toDelete;
   private final List<String> unmanaged;
 
@@ -36,13 +54,10 @@ public final class Plan {
     this.toUpdate =
         managedD.values().stream()
             .filter(d -> servers.containsKey(d.serverId()))
-            .filter(d -> specDrifted(servers.get(d.serverId()), d))
+            .map(d -> new Update(servers.get(d.serverId()), d))
+            .filter(u -> u.cpuChanged() /* || u.ramChanged() */)
             .collect(
-                Collectors.toMap(
-                    d -> d.serverId(),
-                    d -> diff(servers.get(d.serverId()), d),
-                    (a, b) -> a,
-                    TreeMap::new));
+                Collectors.toMap(u -> u.actual().serverId(), u -> u, (a, b) -> a, TreeMap::new));
 
     this.toDelete =
         managedD.values().stream()
@@ -83,23 +98,9 @@ public final class Plan {
     System.out.printf(
         "[ %s ]  create: %d, update: %d, delete: %d%n",
         group, toCreate.size(), toUpdate.size(), toDelete.size());
-    toCreate.keySet().forEach(n -> System.out.println("  + " + n));
-    toUpdate.forEach((id, diff) -> System.out.println("  ~ " + id + "  " + diff));
     toDelete.forEach(n -> System.out.println("  - " + n));
+    toUpdate.forEach((id, u) -> System.out.printf("  ~ %s  (%s)%n", id, u.diff()));
+    toCreate.keySet().forEach(n -> System.out.println("  + " + n));
     System.out.println();
-  }
-
-  private boolean specDrifted(Server s, DomainState d) {
-    // RAM is temporarily excluded from drift detection: libvirt-java 0.5.4
-    // return !s.getSpecHash().equals(Server.specHash(d.cpu(), d.ram()));
-    return s.getCpu() != d.cpu();
-  }
-
-  private String diff(Server s, DomainState d) {
-    StringBuilder sb = new StringBuilder();
-    if (s.getCpu() != d.cpu()) sb.append(String.format(" cpu %d->%d", d.cpu(), s.getCpu()));
-    // RAM excluded from the plan output until libvirt-java ships setMemoryFlags:
-    // if (s.getRam() != d.ram()) sb.append(String.format(" ram %d->%d", d.ram(), s.getRam()));
-    return sb.toString().trim();
   }
 }
