@@ -59,9 +59,11 @@ public class Harmonia implements AutoCloseable {
     Map<String, String> skipped = new LinkedHashMap<>();
 
     for (Server s : this.plan.getToAdopt().values()) {
-
-      if (domainOps.joinDomain(group, s)) joined.add(s.getId());
-      else skipped.put(s.getId(), "join failed (see log)");
+      if (domainOps.joinDomain(s.getName(), s.buildMnemosyneMetadataXml())) joined.add(s.getId());
+      else {
+        log.error("[ {} ] join failed for '{}'", group, s.getId());
+        skipped.put(s.getId(), "join failed (see log)");
+      }
     }
 
     if (joined.isEmpty()) {

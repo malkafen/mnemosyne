@@ -67,11 +67,10 @@ public final class Plan {
             .toList();
 
     this.toAdopt =
-        unmanagedD.values().stream()
-            .filter(d -> servers.containsKey(d.serverId()))
+        servers.entrySet().stream()
+            .filter(e -> unmanagedD.containsKey(e.getValue().getName()))
             .collect(
-                Collectors.toMap(
-                    d -> d.serverId(), d -> servers.get(d.serverId()), (a, b) -> a, TreeMap::new));
+                Collectors.toMap(e -> e.getKey(), e -> e.getValue(), (a, b) -> a, TreeMap::new));
 
     this.unmanaged = unmanagedD.values().stream().map(d -> d.name()).sorted().toList();
   }
@@ -80,11 +79,21 @@ public final class Plan {
     System.out.println();
     if (isJoin) {
       if (unmanaged.isEmpty()) {
-        System.out.printf("[ %s ] no unmanaged domains%n%n", group);
+        System.out.printf("[ %s ]  no unmanaged domains%n%n", group);
         return;
       }
-      System.out.printf("[ %s ]  unmanaged (can be adopted): %d%n%n", group, unmanaged.size());
-      unmanaged.forEach(n -> System.out.println("  > " + n));
+      Map<String, String> adoptByName =
+          toAdopt.entrySet().stream()
+              .collect(Collectors.toMap(e -> e.getValue().getName(), Map.Entry::getKey));
+
+      System.out.printf(
+          "[ %s ]  unmanaged: %d, to adopt: %d%n%n", group, unmanaged.size(), adoptByName.size());
+      for (String n : unmanaged) {
+        String id = adoptByName.get(n);
+        if (id != null) System.out.printf("  + %s  (adopt as '%s')%n", n, id);
+        else System.out.println("  > " + n);
+      }
+      System.out.println();
       return;
     }
 

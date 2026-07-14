@@ -26,10 +26,11 @@ public class PlanTest {
     // Assert
     assertThat(result.getToCreate().keySet()).containsExactly("toCreate");
     assertThat(result.getToUpdate().keySet()).containsExactly("toUpdate");
+    assertThat(result.getToAdopt().keySet()).containsExactly("toAdopt");
 
     assertThat(result.getToDelete()).containsExactly("toDelete-vm");
     assertThat(result.getToDelete()).doesNotContain("neverToDelete");
 
-    assertThat(result.getUnmanaged()).containsExactly("neverToDelete");
+    assertThat(result.getUnmanaged()).containsExactly("neverToDelete", "toAdopt");
   }
 }

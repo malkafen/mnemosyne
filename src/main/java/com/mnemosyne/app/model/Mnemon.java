@@ -85,8 +85,6 @@ public class Mnemon {
           .forEach(
               (key, s) -> {
                 s.setId(key);
-                if (s.getName() == null || s.getName().isBlank()) s.setName(key);
-
                 Templates override = s.getTemplates();
                 s.setTemplates(override == null ? groupTmpl : override.resolveOver(groupTmpl));
 
