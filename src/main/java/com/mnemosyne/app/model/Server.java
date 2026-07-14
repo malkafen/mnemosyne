@@ -34,6 +34,7 @@ public class Server {
   @NotBlank(message = "Server name is required")
   private String name;
 
+  @NotBlank(message = "Server id is required")
   private String id;
 
   private String specHash;
@@ -90,11 +91,6 @@ public class Server {
       throw new IllegalArgumentException("Status cannot be null");
     }
     this.status = status;
-  }
-
-  @NotBlank(message = "Server id is required")
-  public String getId() {
-    return (id == null || id.isBlank()) ? name : id;
   }
 
   public String getSpecHash() {

@@ -81,9 +81,8 @@ public class Harmonia implements AutoCloseable {
       return;
     }
     delete();
-    System.out.println("Delete " + plan.getToDelete());
-    System.out.println("Create " + plan.getToCreate());
-    System.out.println("Update " + plan.getToUpdate());
+    update();
+    create();
   }
 
   // Reconcile methods
@@ -99,5 +98,27 @@ public class Harmonia implements AutoCloseable {
       }
       storageOps.deleteVolumes(volumes, name);
     }
+  }
+
+  private void update() throws LibvirtException {
+    Map<String, String> updated = new LinkedHashMap<>();
+    for (Plan.Update u : plan.getToUpdate().values()) {
+      if (u.cpuChanged())
+        if (domainOps.updateCpu(u.actual().name(), u.server().getCpu()))
+          updated.put(u.server().getId(), u.diff());
+    }
+
+    if (updated.isEmpty()) {
+      log.debug("[ {} ] nothing to update", group);
+      return;
+    }
+    System.out.printf(
+        "%n[ %s ]  updated: %d  (applies after domain restart)%n", group, updated.size());
+    updated.forEach((id, diff) -> System.out.printf("  ~ %s  (%s)%n", id, diff));
+    System.out.println();
+  }
+
+  private void create() throws LibvirtException {
+    System.out.println("Create " + plan.getToCreate());
   }
 }
