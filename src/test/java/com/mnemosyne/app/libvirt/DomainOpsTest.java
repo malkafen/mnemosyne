@@ -4,7 +4,12 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.*;
 
+import com.mnemosyne.app.model.DomainState;
 import com.mnemosyne.app.utils.XmlUtil;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.List;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
@@ -20,6 +25,16 @@ public class DomainOpsTest {
 
   @Mock Connect connect;
   @Mock Domain domain;
+  Domain[] domains;
+
+  @BeforeEach
+  void setUp() {
+    domains = new Domain[] {domain};
+  }
+
+  private String loadXml(String name) throws Exception {
+    return Files.readString(Path.of(getClass().getResource("/" + name).toURI()));
+  }
 
   @Nested
   @DisplayName("joinDomain()")
@@ -134,11 +149,57 @@ public class DomainOpsTest {
       when(connect.domainLookupByName("toDelete")).thenReturn(domain);
       DomainOps domainOps = new DomainOps(connect);
       LibvirtException boom = mock(LibvirtException.class);
-      // Act
       doThrow(boom).when(domain).undefine();
-      // Assert
+      // Act
       assertThatThrownBy(() -> domainOps.undefineDomain("toDelete")).isSameAs(boom);
+      // Assert
       verify(domain).free();
+    }
+  }
+
+  @Nested
+  @DisplayName("readActualState()")
+  class ReadActualState {
+
+    @Test
+    void readActualState_managedDomain_mapsXmlToShortState() throws Exception {
+      // Arrange
+      when(connect.listAllDomains(anyInt())).thenReturn(domains);
+      when(domain.getXMLDesc(anyInt())).thenReturn(loadXml("managed-domain.xml"));
+      DomainOps domainOps = new DomainOps(connect);
+      // Act
+      List<DomainState> actual = domainOps.readActualState();
+
+      // Assert
+      assertThat(actual).hasSize(1);
+
+      assertThat(actual.get(0).name()).isEqualTo("test-vm.example.net");
+      assertThat(actual.get(0).managed()).isTrue();
+      verify(domains[0]).free();
+    }
+
+    @Test
+    void readActualState_noDomains_returnsEmptyList() throws LibvirtException {
+      // Arrange
+      when(connect.listAllDomains(anyInt())).thenReturn(new Domain[] {});
+      DomainOps domainOps = new DomainOps(connect);
+      // Act
+      List<DomainState> actual = domainOps.readActualState();
+      // Assert
+      assertThat(actual).isEmpty();
+    }
+
+    @Test
+    void readActualState_getXmlDescFails_rethrowsAndStillFreesAllHandles() throws LibvirtException {
+      // Arrange
+      when(connect.listAllDomains(anyInt())).thenReturn(domains);
+      LibvirtException boom = mock(LibvirtException.class);
+      DomainOps domainOps = new DomainOps(connect);
+      doThrow(boom).when(domain).getXMLDesc(anyInt());
+      // Act
+      assertThatThrownBy(() -> domainOps.readActualState()).isSameAs(boom);
+      // Assert
+      verify(domains[0]).free();
     }
   }
 }
