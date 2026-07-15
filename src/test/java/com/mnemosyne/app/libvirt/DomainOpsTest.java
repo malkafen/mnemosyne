@@ -2,6 +2,9 @@ package com.mnemosyne.app.libvirt;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
 
 import com.mnemosyne.app.model.DomainState;
@@ -17,6 +20,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.libvirt.Connect;
 import org.libvirt.Domain;
 import org.libvirt.LibvirtException;
+import org.libvirt.StorageVol;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
@@ -25,6 +29,7 @@ public class DomainOpsTest {
 
   @Mock Connect connect;
   @Mock Domain domain;
+  @Mock StorageVol vol;
   Domain[] domains;
 
   @BeforeEach
@@ -200,6 +205,51 @@ public class DomainOpsTest {
       assertThatThrownBy(() -> domainOps.readActualState()).isSameAs(boom);
       // Assert
       verify(domains[0]).free();
+    }
+  }
+
+  @Nested
+  @DisplayName("getVolumes()")
+  class GetVolumes {
+    @Test
+    void getVolumes_domainWithDisks_looksUpVolumesByPath() throws Exception {
+      // Arrange
+      when(connect.domainLookupByName("toLookup")).thenReturn(domain);
+      when(domain.getXMLDesc(anyInt())).thenReturn(loadXml("managed-domain.xml"));
+      when(connect.storageVolLookupByPath(anyString())).thenReturn(vol);
+      DomainOps domainOps = new DomainOps(connect);
+      // Act
+      List<StorageVol> volumes = domainOps.getVolumes("toLookup");
+      // Assert
+      verify(connect).storageVolLookupByPath("/var/lib/libvirt/images/test-vm.qcow2");
+      assertThat(volumes).containsExactly(vol);
+      verify(domain).free();
+    }
+
+    @Test
+    void getVolumes_domainWithoutDisks_returnsEmptyList() throws Exception {
+      // Arrange
+      when(connect.domainLookupByName("toLookup")).thenReturn(domain);
+      when(domain.getXMLDesc(anyInt())).thenReturn(loadXml("managed-domain-without-disk.xml"));
+      DomainOps domainOps = new DomainOps(connect);
+      // Act
+      List<StorageVol> volumes = domainOps.getVolumes("toLookup");
+      // Assert
+      assertThat(volumes).isEmpty();
+      verify(domain).free();
+    }
+
+    @Test
+    void getVolumes_getXmlDescFails_rethrowsAndStillFreesHandle() throws LibvirtException {
+      // Arrange
+      when(connect.domainLookupByName("toLookup")).thenReturn(domain);
+      LibvirtException boom = mock(LibvirtException.class);
+      DomainOps domainOps = new DomainOps(connect);
+      doThrow(boom).when(domain).getXMLDesc(anyInt());
+      // Act
+      assertThatThrownBy(() -> domainOps.getVolumes("toLookup")).isSameAs(boom);
+      // Assert
+      verify(domain).free();
     }
   }
 }

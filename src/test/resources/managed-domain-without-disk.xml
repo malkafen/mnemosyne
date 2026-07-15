@@ -1,0 +1,39 @@
+<domain type="kvm">
+  <name>test-vm.example.net</name>
+  <uuid>11111111-2222-3333-4444-555555555555</uuid>
+  <metadata>
+    <mnem:mnemosyne xmlns:mnem="https://mnemosyne.dev/schema/v1">
+      <mnem:managedBy>mnemosyne</mnem:managedBy>
+      <mnem:serverId>test-vm.example.net</mnem:serverId>
+      <mnem:specVersion>1</mnem:specVersion>
+    </mnem:mnemosyne>
+  </metadata>
+  <memory unit="KiB">2097152</memory>
+  <currentMemory unit="KiB">2097152</currentMemory>
+  <vcpu placement="static">2</vcpu>
+  <os>
+    <type arch="x86_64" machine="pc-q35-7.2">hvm</type>
+    <boot dev="hd"/>
+  </os>
+  <cpu mode="host-passthrough" check="none" migratable="on"/>
+  <clock offset="utc"/>
+  <on_poweroff>destroy</on_poweroff>
+  <on_reboot>restart</on_reboot>
+  <on_crash>destroy</on_crash>
+  <devices>
+    <emulator>/usr/bin/qemu-system-x86_64</emulator>
+    <interface type="network">
+      <mac address="52:54:00:aa:bb:cc"/>
+      <source network="test-bridge"/>
+      <model type="virtio"/>
+    </interface>
+    <serial type="pty">
+      <target type="isa-serial" port="0"/>
+    </serial>
+    <console type="pty">
+      <target type="serial" port="0"/>
+    </console>
+    <graphics type="vnc" port="-1" autoport="yes" listen="127.0.0.1"/>
+    <memballoon model="virtio"/>
+  </devices>
+</domain>
