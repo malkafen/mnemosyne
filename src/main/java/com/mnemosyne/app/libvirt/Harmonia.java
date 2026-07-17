@@ -10,7 +10,6 @@ import java.util.List;
 import java.util.Map;
 import org.libvirt.Connect;
 import org.libvirt.LibvirtException;
-import org.libvirt.StorageVol;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -90,15 +89,10 @@ public class Harmonia implements AutoCloseable {
   // Reconcile methods
   private void delete() throws LibvirtException {
     for (String name : plan.getToDelete()) {
-      List<StorageVol> volumes = domainOps.getVolumes(name);
-      try {
-        domainOps.destroyDomain(name);
-        domainOps.undefineDomain(name);
-      } catch (LibvirtException e) {
-        storageOps.freeVolumesQuietly(volumes);
-        throw e;
-      }
-      storageOps.deleteVolumes(volumes, name);
+      List<String> diskPaths = domainOps.getDiskPaths(name);
+      domainOps.destroyDomain(name);
+      domainOps.undefineDomain(name);
+      storageOps.deleteVolumes(diskPaths, name);
     }
   }
 
