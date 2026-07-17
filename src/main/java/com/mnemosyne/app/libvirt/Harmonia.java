@@ -115,6 +115,8 @@ public class Harmonia implements AutoCloseable {
   }
 
   private void create() throws LibvirtException {
-    System.out.println("Create " + plan.getToCreate());
+    for (Server s : plan.getToCreate().values()) {
+      storageOps.provisionVolume(s.getName(), s.getPool(), s.buildVolumeXml());
+    }
   }
 }

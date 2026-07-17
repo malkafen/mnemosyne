@@ -2,6 +2,7 @@ package com.mnemosyne.app.model;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.dataformat.yaml.YAMLFactory;
+import com.mnemosyne.app.exception.XmlParseException;
 import com.mnemosyne.app.utils.*;
 import jakarta.validation.constraints.*;
 import java.io.File;
@@ -102,8 +103,7 @@ public class Server {
 
   // XML builders
 
-  public String buildVolumeXml()
-      throws ParserConfigurationException, SAXException, IOException, TransformerException {
+  public String buildVolumeXml() {
     Document doc = loadXmlTemplate(this.templates.getVolTmpl());
     setElementText(doc, "name", getName());
     setElementText(doc, "capacity", String.valueOf(this.disk));
@@ -143,20 +143,27 @@ public class Server {
 
   // XML helpers
 
-  private Document loadXmlTemplate(String path)
-      throws ParserConfigurationException, SAXException, IOException {
-    DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
-    factory.setNamespaceAware(true);
-    DocumentBuilder builder = factory.newDocumentBuilder();
-    return builder.parse(new File(path));
+  private Document loadXmlTemplate(String path) {
+    try {
+      DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
+      factory.setNamespaceAware(true);
+      DocumentBuilder builder = factory.newDocumentBuilder();
+      return builder.parse(new File(path));
+    } catch (ParserConfigurationException | SAXException | IOException e) {
+      throw new XmlParseException("Failed to load XML template: " + path, e);
+    }
   }
 
-  private String documentToString(Document doc) throws TransformerException {
-    Transformer transformer = TransformerFactory.newInstance().newTransformer();
-    transformer.setOutputProperty(OutputKeys.INDENT, "yes");
-    StringWriter writer = new StringWriter();
-    transformer.transform(new DOMSource(doc), new StreamResult(writer));
-    return writer.toString();
+  private String documentToString(Document doc) {
+    try {
+      Transformer transformer = TransformerFactory.newInstance().newTransformer();
+      transformer.setOutputProperty(OutputKeys.INDENT, "yes");
+      StringWriter writer = new StringWriter();
+      transformer.transform(new DOMSource(doc), new StreamResult(writer));
+      return writer.toString();
+    } catch (TransformerException e) {
+      throw new XmlParseException("Failed to serialize XML for '" + getName() + "'", e);
+    }
   }
 
   private void setElementText(Document doc, String tag, String value) {
