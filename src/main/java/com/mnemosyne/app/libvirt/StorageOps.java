@@ -17,42 +17,35 @@ class StorageOps {
     this.connect = connect;
   }
 
-  void deleteVolumes(List<StorageVol> volumes, String name) throws VolumeCleanupException {
-    if (volumes == null || volumes.isEmpty()) {
-      log.debug("No volumes to delete for domain '{}'", name);
+  void deleteVolumes(List<String> diskPaths, String domainName) throws VolumeCleanupException {
+    if (diskPaths == null || diskPaths.isEmpty()) {
+      log.debug("No volumes to delete for domain '{}'", domainName);
       return;
     }
     int deleted = 0;
     int failed = 0;
-    for (StorageVol vol : volumes) {
-      if (vol == null) continue;
+
+    for (String path : diskPaths) {
+      StorageVol vol = null;
       try {
+        vol = connect.storageVolLookupByPath(path);
+        if (vol == null) continue;
         vol.delete(0);
         deleted++;
-        log.debug("Deleted a volume of domain '{}'", name);
+        log.debug("Deleted a volume of domain '{}'", domainName);
       } catch (LibvirtException e) {
-        log.error("Failed to delete a volume of domain '{}'; continuing with the rest", name, e);
+        log.error("Failed to delete a volume of domain '{}'; continuing with the rest", domainName, e);
         failed++;
       } finally {
-        freeVolumeQuietly(vol);
+        if (vol != null) freeVolumeQuietly(vol);
       }
     }
     if (failed > 0) {
       throw new VolumeCleanupException(
           String.format(
-              "Failed to delete %d of %d volumes for domain '%s'", failed, deleted + failed, name));
+              "Failed to delete %d of %d volumes for domain '%s'", failed, deleted + failed, domainName));
     } else {
-      log.debug("Volume cleanup for domain '{}': {} deleted", name, deleted);
-    }
-  }
-
-  void freeVolumesQuietly(List<StorageVol> volumes) {
-    if (volumes == null || volumes.isEmpty()) {
-      return;
-    }
-    for (StorageVol vol : volumes) {
-      if (vol == null) continue;
-      freeVolumeQuietly(vol);
+      log.debug("Volume cleanup for domain '{}': {} deleted", domainName, deleted);
     }
   }
 

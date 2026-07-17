@@ -20,7 +20,6 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.libvirt.Connect;
 import org.libvirt.Domain;
 import org.libvirt.LibvirtException;
-import org.libvirt.StorageVol;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
@@ -29,7 +28,6 @@ public class DomainOpsTest {
 
   @Mock Connect connect;
   @Mock Domain domain;
-  @Mock StorageVol vol;
   Domain[] domains;
 
   @BeforeEach
@@ -209,45 +207,43 @@ public class DomainOpsTest {
   }
 
   @Nested
-  @DisplayName("getVolumes()")
-  class GetVolumes {
+  @DisplayName("getDiskPaths()")
+  class GetDiskPaths {
     @Test
-    void getVolumes_domainWithDisks_looksUpVolumesByPath() throws Exception {
+    void getDiskPaths_domainWithDisks_returnsPaths() throws Exception {
       // Arrange
       when(connect.domainLookupByName("toLookup")).thenReturn(domain);
       when(domain.getXMLDesc(anyInt())).thenReturn(loadXml("managed-domain.xml"));
-      when(connect.storageVolLookupByPath(anyString())).thenReturn(vol);
       DomainOps domainOps = new DomainOps(connect);
       // Act
-      List<StorageVol> volumes = domainOps.getVolumes("toLookup");
+      List<String> paths = domainOps.getDiskPaths("toLookup");
       // Assert
-      verify(connect).storageVolLookupByPath("/var/lib/libvirt/images/test-vm.qcow2");
-      assertThat(volumes).containsExactly(vol);
+      assertThat(paths).containsExactly("/var/lib/libvirt/images/test-vm.qcow2");
       verify(domain).free();
     }
 
     @Test
-    void getVolumes_domainWithoutDisks_returnsEmptyList() throws Exception {
+    void getDiskPaths_domainWithoutDisks_returnsEmptyList() throws Exception {
       // Arrange
       when(connect.domainLookupByName("toLookup")).thenReturn(domain);
       when(domain.getXMLDesc(anyInt())).thenReturn(loadXml("managed-domain-without-disk.xml"));
       DomainOps domainOps = new DomainOps(connect);
       // Act
-      List<StorageVol> volumes = domainOps.getVolumes("toLookup");
+      List<String> paths = domainOps.getDiskPaths("toLookup");
       // Assert
-      assertThat(volumes).isEmpty();
+      assertThat(paths).isEmpty();
       verify(domain).free();
     }
 
     @Test
-    void getVolumes_getXmlDescFails_rethrowsAndStillFreesHandle() throws LibvirtException {
+    void getDiskPaths_getXmlDescFails_rethrowsAndStillFreesHandle() throws LibvirtException {
       // Arrange
       when(connect.domainLookupByName("toLookup")).thenReturn(domain);
       LibvirtException boom = mock(LibvirtException.class);
       DomainOps domainOps = new DomainOps(connect);
       doThrow(boom).when(domain).getXMLDesc(anyInt());
       // Act
-      assertThatThrownBy(() -> domainOps.getVolumes("toLookup")).isSameAs(boom);
+      assertThatThrownBy(() -> domainOps.getDiskPaths("toLookup")).isSameAs(boom);
       // Assert
       verify(domain).free();
     }

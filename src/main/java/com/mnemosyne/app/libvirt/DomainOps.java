@@ -7,7 +7,6 @@ import java.util.List;
 import org.libvirt.Connect;
 import org.libvirt.Domain;
 import org.libvirt.LibvirtException;
-import org.libvirt.StorageVol;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -92,7 +91,7 @@ class DomainOps {
     }
   }
 
-  List<StorageVol> getVolumes(String name) throws LibvirtException {
+  List<String> getDiskPaths(String name) throws LibvirtException {
     Domain d = connect.domainLookupByName(name);
     final List<String> diskPaths;
     try {
@@ -109,9 +108,7 @@ class DomainOps {
       log.debug("Domain '{}' has no file-backed disk paths", name);
       return List.of();
     }
-    List<StorageVol> volumes = new ArrayList<>(diskPaths.size());
-    for (String path : diskPaths) volumes.add(connect.storageVolLookupByPath(path));
-    return volumes;
+    return diskPaths;
   }
 
   boolean updateCpu(String name, int cpu) throws LibvirtException {
