@@ -2,7 +2,9 @@ package com.mnemosyne.app.libvirt;
 
 import com.mnemosyne.app.exception.*;
 import java.util.List;
+import java.util.Optional;
 import org.libvirt.Connect;
+import org.libvirt.Error;
 import org.libvirt.LibvirtException;
 import org.libvirt.StoragePool;
 import org.libvirt.StorageVol;
@@ -56,6 +58,13 @@ class StorageOps {
       throws LibvirtException {
     log.debug("Provisioning volume for domain '{}' in storage pool '{}'", domainName, poolName);
     StoragePool pool = lookupPool(poolName);
+    try {
+      Optional<String> path = findExistingVolumePath(pool, domainName);
+      if (path.isPresent()) return path.get();
+      // TODO crate volume for new server
+    } finally {
+      freePoolQuietly(pool);
+    }
 
     return null;
   }
@@ -77,6 +86,27 @@ class StorageOps {
     }
     log.debug("Storage pool '{}' ready", name);
     return pool;
+  }
+
+  private Optional<String> findExistingVolumePath(StoragePool pool, String domainName)
+      throws LibvirtException {
+    log.debug("Fetch a storage volume '{}'", domainName);
+    StorageVol vol = null;
+    try {
+      vol = pool.storageVolLookupByName(domainName);
+      String path = vol.getPath();
+      log.debug("Volume '{}' found (path: {})", domainName, path);
+      return Optional.of(path);
+    } catch (LibvirtException e) {
+      if (e.getError().getCode() == Error.ErrorNumber.VIR_ERR_NO_STORAGE_VOL) {
+        log.debug("Volume '{}' doesn't exist", domainName);
+        return Optional.empty();
+      }
+      log.error("Failed to lookup volume '{}': {}", domainName, e.getMessage());
+      throw e;
+    } finally {
+      if (vol != null) freeVolumeQuietly(vol);
+    }
   }
 
   private void freePoolQuietly(StoragePool pool) {
