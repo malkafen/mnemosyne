@@ -1,5 +1,6 @@
 package com.mnemosyne.app.libvirt;
 
+import com.mnemosyne.app.libvirt.StorageOps.VolumeSpec;
 import com.mnemosyne.app.model.DomainState;
 import com.mnemosyne.app.model.Plan;
 import com.mnemosyne.app.model.Server;
@@ -116,7 +117,10 @@ public class Harmonia implements AutoCloseable {
 
   private void create() throws LibvirtException {
     for (Server s : plan.getToCreate().values()) {
-      storageOps.provisionVolume(s.getName(), s.getPool(), s.buildVolumeXml());
+      VolumeSpec spec =
+          new VolumeSpec(s.getName(), s.getPool(), s.buildVolumeXml(), s.getVolLookup());
+      s.setVolPath(storageOps.provisionVolume(spec));
+      System.out.println(s.getVolPath());
     }
   }
 }

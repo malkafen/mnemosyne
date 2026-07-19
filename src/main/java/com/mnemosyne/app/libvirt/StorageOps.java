@@ -20,6 +20,8 @@ class StorageOps {
     this.connect = connect;
   }
 
+  record VolumeSpec(String domainName, String poolName, String volXml, String cloneSource) {}
+
   void deleteVolumes(List<String> diskPaths, String domainName) throws VolumeCleanupException {
     if (diskPaths == null || diskPaths.isEmpty()) {
       log.debug("No volumes to delete for domain '{}'", domainName);
@@ -54,12 +56,14 @@ class StorageOps {
     }
   }
 
-  String provisionVolume(String domainName, String poolName, String volXml)
-      throws LibvirtException {
-    log.debug("Provisioning volume for domain '{}' in storage pool '{}'", domainName, poolName);
-    StoragePool pool = lookupPool(poolName);
+  String provisionVolume(VolumeSpec spec) throws LibvirtException {
+    log.debug(
+        "Provisioning volume for domain '{}' in storage pool '{}'",
+        spec.domainName(),
+        spec.poolName());
+    StoragePool pool = lookupPool(spec.poolName());
     try {
-      Optional<String> path = findExistingVolumePath(pool, domainName);
+      Optional<String> path = findExistingVolumePath(pool, spec.domainName());
       if (path.isPresent()) return path.get();
       // TODO crate volume for new server
     } finally {
