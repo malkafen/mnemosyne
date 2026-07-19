@@ -20,7 +20,14 @@ class StorageOps {
     this.connect = connect;
   }
 
-  record VolumeSpec(String domainName, String poolName, String volXml, String cloneSource) {}
+  record VolumeSpec(
+      String volumeName, String poolName, String volXml, String cloneSource, long targetCapacity) {
+    private static final long GIB = 1024L * 1024 * 1024;
+
+    VolumeSpec {
+      targetCapacity = targetCapacity * GIB;
+    }
+  }
 
   void deleteVolumes(List<String> diskPaths, String domainName) throws VolumeCleanupException {
     if (diskPaths == null || diskPaths.isEmpty()) {
@@ -59,18 +66,16 @@ class StorageOps {
   String provisionVolume(VolumeSpec spec) throws LibvirtException {
     log.debug(
         "Provisioning volume for domain '{}' in storage pool '{}'",
-        spec.domainName(),
+        spec.volumeName(),
         spec.poolName());
     StoragePool pool = lookupPool(spec.poolName());
     try {
-      Optional<String> path = findExistingVolumePath(pool, spec.domainName());
+      Optional<String> path = findExistingVolumePath(pool, spec.volumeName());
       if (path.isPresent()) return path.get();
-      // TODO crate volume for new server
+      return newVolume(pool, spec);
     } finally {
       freePoolQuietly(pool);
     }
-
-    return null;
   }
 
   private StoragePool lookupPool(String name) throws LibvirtException {
@@ -110,6 +115,57 @@ class StorageOps {
       throw e;
     } finally {
       if (vol != null) freeVolumeQuietly(vol);
+    }
+  }
+
+  private String newVolume(StoragePool pool, VolumeSpec spec) throws LibvirtException {
+    log.trace(
+        "Volume XML for '{}' (pool '{}'):\n{}", spec.volumeName(), spec.poolName(), spec.volXml());
+    log.debug("Looking up clone source '{}' in pool '{}'", spec.cloneSource(), spec.poolName());
+    StorageVol cloneVol = pool.storageVolLookupByName(spec.cloneSource());
+    StorageVol newVol = null;
+
+    log.debug(
+        "Cloning '{}' -> '{}' in pool '{}'",
+        spec.cloneSource(),
+        spec.volumeName(),
+        spec.poolName());
+    try {
+      newVol = pool.storageVolCreateXMLFrom(spec.volXml(), cloneVol, 0);
+      resizeVolume(newVol, spec);
+      return newVol.getPath();
+    } finally {
+      freeVolumeQuietly(cloneVol);
+      if (newVol != null) freeVolumeQuietly(newVol);
+    }
+  }
+
+  private void resizeVolume(StorageVol vol, VolumeSpec spec) throws LibvirtException {
+    log.debug("Resizing volume '{}' to {} bytes", spec.volumeName(), spec.targetCapacity());
+    try {
+      vol.resize(spec.targetCapacity(), 0);
+    } catch (LibvirtException e) {
+      log.error(
+          "Failed to resize volume '{}' to {} bytes, rolling back",
+          spec.volumeName(),
+          spec.targetCapacity(),
+          e);
+      rollbackVolume(vol, spec);
+      throw e;
+    }
+  }
+
+  private void rollbackVolume(StorageVol vol, VolumeSpec spec) {
+    try {
+      log.debug("Rolling back: deleting volume '{}'", spec.volumeName());
+      vol.delete(0);
+      log.debug("Rollback successful: volume '{}' deleted", spec.volumeName());
+    } catch (LibvirtException e) {
+      log.error(
+          "Rollback failed: could not delete volume '{}': {}",
+          spec.volumeName(),
+          e.getMessage(),
+          e);
     }
   }
 
