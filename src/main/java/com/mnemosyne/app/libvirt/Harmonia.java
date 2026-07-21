@@ -1,5 +1,6 @@
 package com.mnemosyne.app.libvirt;
 
+import com.mnemosyne.app.http.CloudInitServer;
 import com.mnemosyne.app.libvirt.StorageOps.VolumeSpec;
 import com.mnemosyne.app.model.DomainState;
 import com.mnemosyne.app.model.Plan;
@@ -121,7 +122,7 @@ public class Harmonia implements AutoCloseable {
           new VolumeSpec(
               s.getName(), s.getPool(), s.buildVolumeXml(), s.getVolLookup(), s.getDisk());
       s.setVolPath(storageOps.provisionVolume(spec));
-      System.out.println(s.getVolPath());
+      CloudInitServer.register(s.buildSeed());
     }
   }
 }
