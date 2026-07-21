@@ -15,6 +15,7 @@ COPY ./templates/server.xml \
      ./templates/volume.xml \
      ./templates/user-data.yml \
      ./templates/network-config.yml \
+     ./templates/meta-data.yml \
      /app/templates/
 COPY ./configs/logback.xml /app/configs/logback.xml
 COPY --from=build /app/target/mnemosyne-*.jar /app/mnemosyne.jar
