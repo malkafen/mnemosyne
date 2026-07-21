@@ -166,26 +166,5 @@ public class CloudInitServer {
         os.write(bytes);
       }
     }
-
-    private void waitForCloudInit() throws InterruptedException {
-      for (int attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
-        int done = CloudInitServer.getStopCounter();
-        int total = CloudInitServer.getUserDataSize();
-        log.debug("Cloud-init progress: {}/{}, attempt {}/{}", done, total, attempt, MAX_ATTEMPTS);
-
-        if (done == total) {
-          log.info(
-              "All cloud-init tasks completed ({}/{}). Preparing for shutdown...", done, total);
-          return;
-        }
-        Thread.sleep(POLL_INTERVAL_MS);
-      }
-      log.warn(
-          "Timeout reached ({} attempts). Forcing shutdown without full cloud-init completion"
-              + " ({}/{})",
-          MAX_ATTEMPTS,
-          CloudInitServer.getStopCounter(),
-          CloudInitServer.getUserDataSize());
-    }
   }
 }
