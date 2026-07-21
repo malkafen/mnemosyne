@@ -117,17 +117,17 @@ public class Server {
     return documentToString(doc);
   }
 
-public String buildServerXml() {
-  Document doc = loadXmlTemplate(this.templates.getServerTmpl());
-  setElementText(doc, "name", getName());
-  setElementText(doc, "memory", String.valueOf(this.ram));
-  setElementText(doc, "vcpu", String.valueOf(this.cpu));
-  setElementTextNS(doc, "https://mnemosyne.dev/schema/v1", "serverId", getId());
-  setCloudInitSerial(doc);
-  setDiskSource(doc);
-  setInterfaceNetwork(doc);
-  return documentToString(doc);
-}
+  public String buildServerXml() {
+    Document doc = loadXmlTemplate(this.templates.getServerTmpl());
+    setElementText(doc, "name", getName());
+    setElementText(doc, "memory", String.valueOf(this.ram));
+    setElementText(doc, "vcpu", String.valueOf(this.cpu));
+    setElementTextNS(doc, "https://mnemosyne.dev/schema/v1", "serverId", getId());
+    setCloudInitSerial(doc);
+    setDiskSource(doc);
+    setInterfaceNetwork(doc);
+    return documentToString(doc);
+  }
 
   public String buildMnemosyneMetadataXml() {
     return String.format(
