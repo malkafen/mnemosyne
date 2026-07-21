@@ -4,6 +4,7 @@ import com.mnemosyne.app.config.*;
 import com.mnemosyne.app.http.*;
 import com.mnemosyne.app.libvirt.Harmonia;
 import com.mnemosyne.app.model.*;
+import com.mnemosyne.app.output.Report;
 import jakarta.validation.*;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -46,6 +47,7 @@ class Mnemosyne {
         irides.add(new Iris(m, h));
       }
 
+      Report.heading("Plan");
       for (Iris i : irides) {
         i.harmonia.plan(i.mnemon().getServers()).print(i.mnemon.getGroup(), config.isJoin());
       }
@@ -53,6 +55,7 @@ class Mnemosyne {
       if (config.isPlanOnly()) return;
       confirmWindow();
 
+      Report.heading("Applied");
       for (Iris i : irides) {
         if (config.isJoin()) i.harmonia.join();
         else i.harmonia().reconcile(); // <----- we are here

@@ -60,7 +60,7 @@ class DomainOps {
     try {
       log.debug("Creating domain '{}'...", name);
       d.create();
-      log.info("Domain '{}' has been started successfully.", name);
+      log.debug("Domain '{}' has been started successfully.", name);
     } catch (LibvirtException e) {
       log.error("Failed to create domain '{}': {}.", name, e.getMessage(), e);
       throw e;

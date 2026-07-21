@@ -1,14 +1,14 @@
 package com.mnemosyne.app.libvirt;
 
+import com.mnemosyne.app.exception.VolumeCleanupException;
 import com.mnemosyne.app.http.CloudInitServer;
 import com.mnemosyne.app.libvirt.DomainOps.DomainSpec;
 import com.mnemosyne.app.libvirt.StorageOps.VolumeSpec;
 import com.mnemosyne.app.model.DomainState;
 import com.mnemosyne.app.model.Plan;
 import com.mnemosyne.app.model.Server;
+import com.mnemosyne.app.output.Report;
 import java.io.IOException;
-import java.util.ArrayList;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import org.libvirt.Connect;
@@ -57,26 +57,16 @@ public class Harmonia implements AutoCloseable {
       return;
     }
 
-    List<String> joined = new ArrayList<>();
-    Map<String, String> skipped = new LinkedHashMap<>();
-
+    Report report = new Report();
     for (Server s : this.plan.getToAdopt().values()) {
-      if (domainOps.joinDomain(s.getName(), s.buildMnemosyneMetadataXml())) joined.add(s.getId());
+      if (domainOps.joinDomain(s.getName(), s.buildMnemosyneMetadataXml()))
+        report.add("join", "+", s.getId(), "");
       else {
         log.error("[ {} ] join failed for '{}'", group, s.getId());
-        skipped.put(s.getId(), "join failed (see log)");
+        report.skip(s.getId(), "join failed (see log)");
       }
     }
-
-    if (joined.isEmpty()) {
-      System.out.printf("%n[ %s ]  nothing joined, skipped: %d%n", group, skipped.size());
-    } else {
-      System.out.printf(
-          "%n[ %s ]  joined: %d, skipped: %d%n", group, joined.size(), skipped.size());
-    }
-    joined.forEach(n -> System.out.println("  + " + n));
-    skipped.forEach((n, reason) -> System.out.printf("  · %s  (%s)%n", n, reason));
-    System.out.println();
+    report.print(group);
   }
 
   public void reconcile() throws LibvirtException {
@@ -84,48 +74,53 @@ public class Harmonia implements AutoCloseable {
       log.debug("[ {} ] nothing to reconcile (no plan)", group);
       return;
     }
-    delete();
-    update();
-    create();
+    Report report = new Report();
+    delete(report);
+    update(report);
+    create(report);
+    report.print(group);
   }
 
   // Reconcile methods
-  private void delete() throws LibvirtException {
+  private void delete(Report report) {
     for (String name : plan.getToDelete()) {
-      List<String> diskPaths = domainOps.getDiskPaths(name);
-      domainOps.destroyDomain(name);
-      domainOps.undefineDomain(name);
-      storageOps.deleteVolumes(diskPaths, name);
+      try {
+        List<String> diskPaths = domainOps.getDiskPaths(name);
+        domainOps.destroyDomain(name);
+        domainOps.undefineDomain(name);
+        storageOps.deleteVolumes(diskPaths, name);
+        report.add("delete", "-", name, "");
+      } catch (LibvirtException | VolumeCleanupException e) {
+        log.error("[ {} ] delete failed for '{}'", group, name, e);
+        report.skip(name, "delete failed (see log)");
+      }
     }
   }
 
-  private void update() throws LibvirtException {
-    Map<String, String> updated = new LinkedHashMap<>();
+  private void update(Report report) throws LibvirtException {
     for (Plan.Update u : plan.getToUpdate().values()) {
       if (u.cpuChanged())
         if (domainOps.updateCpu(u.actual().name(), u.server().getCpu()))
-          updated.put(u.server().getId(), u.diff());
+          report.add("update", "~", u.server().getId(), u.diff() + ", applies after restart");
     }
-
-    if (updated.isEmpty()) {
-      log.debug("[ {} ] nothing to update", group);
-      return;
-    }
-    System.out.printf(
-        "%n[ %s ]  updated: %d  (applies after domain restart)%n", group, updated.size());
-    updated.forEach((id, diff) -> System.out.printf("  ~ %s  (%s)%n", id, diff));
-    System.out.println();
   }
 
-  private void create() throws LibvirtException {
+  private void create(Report report) {
     for (Server s : plan.getToCreate().values()) {
-      VolumeSpec volSpec =
-          new VolumeSpec(
-              s.getName(), s.getPool(), s.buildVolumeXml(), s.getVolLookup(), s.getDisk());
-      s.setVolPath(storageOps.provisionVolume(volSpec));
-      DomainSpec domainSpec = new DomainSpec(s.getName(), s.buildServerXml(), s.isLaunch());
-      CloudInitServer.register(s.buildSeed());
-      domainOps.setupDomain(domainSpec);
+      try {
+        VolumeSpec volSpec =
+            new VolumeSpec(
+                s.getName(), s.getPool(), s.buildVolumeXml(), s.getVolLookup(), s.getDisk());
+        s.setVolPath(storageOps.provisionVolume(volSpec));
+        DomainSpec domainSpec = new DomainSpec(s.getName(), s.buildServerXml(), s.isLaunch());
+        CloudInitServer.register(s.buildSeed());
+        domainOps.setupDomain(domainSpec);
+        report.add("create", "+", s.getId(), "");
+      } catch (LibvirtException e) {
+        log.error("[ {} ] create failed for '{}'", group, s.getId(), e);
+        CloudInitServer.unregister(s.getName());
+        report.skip(s.getId(), "create failed (see log)");
+      }
     }
   }
 }

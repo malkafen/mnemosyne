@@ -1,5 +1,6 @@
 package com.mnemosyne.app.model;
 
+import com.mnemosyne.app.output.Report;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -76,40 +77,25 @@ public final class Plan {
   }
 
   public void print(String group, boolean isJoin) {
-    System.out.println();
+    Report report = new Report();
+
     if (isJoin) {
-      if (unmanaged.isEmpty()) {
-        System.out.printf("[ %s ]  no unmanaged domains%n%n", group);
-        return;
-      }
       Map<String, String> adoptByName =
           toAdopt.entrySet().stream()
               .collect(Collectors.toMap(e -> e.getValue().getName(), Map.Entry::getKey));
 
-      System.out.printf(
-          "[ %s ]  unmanaged: %d, to adopt: %d%n%n", group, unmanaged.size(), adoptByName.size());
       for (String n : unmanaged) {
         String id = adoptByName.get(n);
-        if (id != null) System.out.printf("  + %s  (adopt as '%s')%n", n, id);
-        else System.out.println("  > " + n);
+        if (id != null) report.add("adopt", "+", n, "as '" + id + "'");
+        else report.add("unmanaged", ">", n, "");
       }
-      System.out.println();
+      report.print(group, "no unmanaged domains");
       return;
     }
 
-    boolean noChanges = toCreate.isEmpty() && toUpdate.isEmpty() && toDelete.isEmpty();
-
-    if (noChanges) {
-      System.out.printf("[ %s ]  no changes%n", group);
-      return;
-    }
-
-    System.out.printf(
-        "[ %s ]  create: %d, update: %d, delete: %d%n",
-        group, toCreate.size(), toUpdate.size(), toDelete.size());
-    toDelete.forEach(n -> System.out.println("  - " + n));
-    toUpdate.forEach((id, u) -> System.out.printf("  ~ %s  (%s)%n", id, u.diff()));
-    toCreate.keySet().forEach(n -> System.out.println("  + " + n));
-    System.out.println();
+    toDelete.forEach(n -> report.add("delete", "-", n, ""));
+    toUpdate.forEach((id, u) -> report.add("update", "~", id, u.diff()));
+    toCreate.keySet().forEach(n -> report.add("create", "+", n, ""));
+    report.print(group, "no changes");
   }
 }

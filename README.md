@@ -296,28 +296,50 @@ templates:
 ## Example output
 
 ```
-[ hv01.example.lan ]  create: 1, update: 1, delete: 1
-  + web-01
-  ~ cache-01  cpu 2->4
+10:42:07 Connection to 'hv01.example.lan' was successful.
+
+--- Plan ---------------------------------------------------
+[ hv01.example.lan ]  delete: 1, update: 1, create: 1
   - old-test.example.lan
+  ~ cache-01  (cpu 2->4)
+  + web-01
+
+[ hv02.example.lan ]  no changes
 
 Applying in 10s — Ctrl+C to abort...
-10:42:07 Connection to 'hv01.example.lan' was successful.
-10:42:19 Domain 'web-01.example.lan' has been started successfully.
+
+--- Applied ------------------------------------------------
+[ hv01.example.lan ]  delete: 1, update: 1, create: 1
+  - old-test.example.lan
+  ~ cache-01  (cpu 2->4, applies after restart)
+  + web-01
+
 10:42:21 All 1 mnemones provisioned. Waiting cloud-init is done...
 10:43:35 All cloud-init tasks completed (1/1). Preparing for shutdown...
+```
+
+`Plan` and `Applied` share one format, so the two blocks line up entry by entry. Anything that
+failed keeps the run going and is listed under `skipped`:
+
+```
+--- Applied ------------------------------------------------
+[ hv01.example.lan ]  delete: 1, create: 1, skipped: 1
+  - old-test.example.lan
+  + web-01
+  · cache-01  (update failed (see log))
 ```
 
 With `--join`, the plan instead lists the unmanaged domains that can be adopted:
 
 ```
-[ hv01.example.lan ]  unmanaged (can be adopted): 2
-  > legacy-web.example.lan
+--- Plan ---------------------------------------------------
+[ hv01.example.lan ]  adopt: 1, unmanaged: 1
+  + legacy-web.example.lan  (as 'web-01')
   > legacy-db.example.lan
 
-[ hv01.example.lan ]  joined: 1 (skipped: 1)
-  + legacy-web.example.lan
-  · legacy-db.example.lan
+--- Applied ------------------------------------------------
+[ hv01.example.lan ]  join: 1
+  + web-01
 ```
 
 ---
@@ -332,6 +354,7 @@ src/main/java/com/mnemosyne/app/
   model/Server.java              # one VM: XML/YAML template rendering, validation
   model/Templates.java           # template paths: group defaults + per-server overrides
   model/Plan.java                # create / update / delete / unmanaged diff
+  output/Report.java             # shared plan/apply block printed to the console
   model/Status.java              # per-server lifecycle status
   model/DomainState.java         # snapshot of a live domain (id, cpu, ram, managedBy)
   model/DomainInspector.java     # read metadata & disk paths back from existing domain XML

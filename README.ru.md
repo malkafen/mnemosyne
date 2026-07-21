@@ -297,28 +297,50 @@ templates:
 ## Пример вывода
 
 ```
-[ hv01.example.lan ]  create: 1, update: 1, delete: 1
-  + web-01
-  ~ cache-01  cpu 2->4
+10:42:07 Connection to 'hv01.example.lan' was successful.
+
+--- Plan ---------------------------------------------------
+[ hv01.example.lan ]  delete: 1, update: 1, create: 1
   - old-test.example.lan
+  ~ cache-01  (cpu 2->4)
+  + web-01
+
+[ hv02.example.lan ]  no changes
 
 Applying in 10s — Ctrl+C to abort...
-10:42:07 Connection to 'hv01.example.lan' was successful.
-10:42:19 Domain 'web-01.example.lan' has been started successfully.
+
+--- Applied ------------------------------------------------
+[ hv01.example.lan ]  delete: 1, update: 1, create: 1
+  - old-test.example.lan
+  ~ cache-01  (cpu 2->4, applies after restart)
+  + web-01
+
 10:42:21 All 1 mnemones provisioned. Waiting cloud-init is done...
 10:43:35 All cloud-init tasks completed (1/1). Preparing for shutdown...
+```
+
+`Plan` и `Applied` печатаются в одном формате, поэтому блоки сравниваются построчно. Сбой на
+отдельном домене не прерывает прогон — такие записи попадают в `skipped`:
+
+```
+--- Applied ------------------------------------------------
+[ hv01.example.lan ]  delete: 1, create: 1, skipped: 1
+  - old-test.example.lan
+  + web-01
+  · cache-01  (update failed (see log))
 ```
 
 С `--join` план вместо этого показывает unmanaged-домены, которые можно усыновить:
 
 ```
-[ hv01.example.lan ]  unmanaged (can be adopted): 2
-  > legacy-web.example.lan
+--- Plan ---------------------------------------------------
+[ hv01.example.lan ]  adopt: 1, unmanaged: 1
+  + legacy-web.example.lan  (as 'web-01')
   > legacy-db.example.lan
 
-[ hv01.example.lan ]  joined: 1 (skipped: 1)
-  + legacy-web.example.lan
-  · legacy-db.example.lan
+--- Applied ------------------------------------------------
+[ hv01.example.lan ]  join: 1
+  + web-01
 ```
 
 ---
@@ -333,6 +355,7 @@ src/main/java/com/mnemosyne/app/
   model/Server.java              # одна ВМ: рендеринг XML/YAML-шаблонов, валидация
   model/Templates.java           # пути к шаблонам: умолчания группы + переопределения по серверу
   model/Plan.java                # diff создать / обновить / удалить / unmanaged
+  output/Report.java             # общий блок plan/apply, печатаемый в консоль
   model/Status.java              # статус жизненного цикла сервера
   model/DomainState.java         # снимок живого домена (id, cpu, ram, managedBy)
   model/DomainInspector.java     # чтение метаданных и путей дисков из XML существующего домена
