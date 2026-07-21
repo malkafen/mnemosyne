@@ -157,7 +157,7 @@ public class CloudInitServer {
           return userData.get(serverName);
         case "meta-data":
           log.debug("/meta-data requested for '{}'", serverName);
-          return "instance-id: someid/somehostname\n";
+          return metaData.get(serverName);
         case "network-config":
           log.debug("/network-config requested for '{}'", serverName);
           return networkConfig.get(serverName);

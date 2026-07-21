@@ -218,7 +218,14 @@ public class Server {
   // YAML builders
 
   private String buildMetaData() {
-    return "test";
+    try {
+      Map<String, Object> yaml = loadYamlTemplate(this.templates.getMetaDataTmpl());
+      yaml.put("instance-id", getId());
+      yaml.put("local-hostname", getName());
+      return yamlMapper().writeValueAsString(yaml);
+    } catch (IOException e) {
+      throw new TemplateException("Failed to build meta-data YAML for '" + getName() + "'", e);
+    }
   }
 
   public String buildUserDataYaml() {
