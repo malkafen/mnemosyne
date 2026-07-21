@@ -54,14 +54,6 @@ public class CloudInitServer {
     return userData.size();
   }
 
-  public static void setUserData(String name, String response) {
-    userData.put(name, response);
-  }
-
-  public static void setNetworkConfig(String name, String response) {
-    networkConfig.put(name, response);
-  }
-
   public static int getStopCounter() {
     return stopCounter;
   }
