@@ -39,6 +39,13 @@ public class CloudInitServer {
     log.trace("meta-data for '{}':\n{}", seed.name(), seed.metaData());
   }
 
+  public static void unregister(String name) {
+    networkConfig.remove(name);
+    userData.remove(name);
+    metaData.remove(name);
+    log.debug("Unregistered cloud-init configs for '{}'", name);
+  }
+
   private static final ExecutorService waiter =
       Executors.newSingleThreadExecutor(
           r -> {
