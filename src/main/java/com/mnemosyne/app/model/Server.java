@@ -80,7 +80,6 @@ public class Server {
   private String network = "default";
 
   private boolean launch = true;
-  private Status status = null;
 
   public record Seed(String name, String metaData, String userData, String networkConfig) {}
 
@@ -91,13 +90,6 @@ public class Server {
   public static String specHash(int cpu, long ram) {
     String spec = String.join("\u001f", String.valueOf(cpu), String.valueOf(ram));
     return Sha256Util.sha256Hex(spec);
-  }
-
-  public void setStatus(Status status) {
-    if (status == null) {
-      throw new IllegalArgumentException("Status cannot be null");
-    }
-    this.status = status;
   }
 
   public String getName() {
