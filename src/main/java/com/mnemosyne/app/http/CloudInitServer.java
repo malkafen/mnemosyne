@@ -54,14 +54,6 @@ public class CloudInitServer {
     return userData.size();
   }
 
-  public static void setUserData(String name, String response) {
-    userData.put(name, response);
-  }
-
-  public static void setNetworkConfig(String name, String response) {
-    networkConfig.put(name, response);
-  }
-
   public static int getStopCounter() {
     return stopCounter;
   }
@@ -173,27 +165,6 @@ public class CloudInitServer {
       try (OutputStream os = exchange.getResponseBody()) {
         os.write(bytes);
       }
-    }
-
-    private void waitForCloudInit() throws InterruptedException {
-      for (int attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
-        int done = CloudInitServer.getStopCounter();
-        int total = CloudInitServer.getUserDataSize();
-        log.debug("Cloud-init progress: {}/{}, attempt {}/{}", done, total, attempt, MAX_ATTEMPTS);
-
-        if (done == total) {
-          log.info(
-              "All cloud-init tasks completed ({}/{}). Preparing for shutdown...", done, total);
-          return;
-        }
-        Thread.sleep(POLL_INTERVAL_MS);
-      }
-      log.warn(
-          "Timeout reached ({} attempts). Forcing shutdown without full cloud-init completion"
-              + " ({}/{})",
-          MAX_ATTEMPTS,
-          CloudInitServer.getStopCounter(),
-          CloudInitServer.getUserDataSize());
     }
   }
 }
