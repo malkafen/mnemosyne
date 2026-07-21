@@ -19,6 +19,54 @@ class DomainOps {
     this.connect = connect;
   }
 
+  record DomainSpec(String name, String domainXml, boolean isLaunch) {}
+
+  void setupDomain(DomainSpec spec) throws LibvirtException {
+    Domain d = defineDomain(spec);
+    try {
+      if (spec.isLaunch()) {
+        try {
+          createDomain(d, spec.name());
+        } catch (LibvirtException e) {
+          try {
+            undefineDomain(spec.name());
+          } catch (LibvirtException u) {
+            e.addSuppressed(u);
+          }
+          throw e;
+        }
+      }
+    } finally {
+      freeDomainQuietly(d);
+    }
+  }
+
+  private Domain defineDomain(DomainSpec spec) throws LibvirtException {
+    try {
+      log.trace("Domain XML for server '{}': {}", spec.name(), spec.domainXml());
+      Domain d = connect.domainDefineXML(spec.domainXml());
+      return d;
+    } catch (LibvirtException e) {
+      log.error(
+          "Libvirt operation failed when define for server '{}' (code: {})",
+          spec.name(),
+          e.getError() != null ? e.getError().getCode() : "unknown",
+          e);
+      throw e;
+    }
+  }
+
+  private void createDomain(Domain d, String name) throws LibvirtException {
+    try {
+      log.debug("Creating domain '{}'...", name);
+      d.create();
+      log.info("Domain '{}' has been started successfully.", name);
+    } catch (LibvirtException e) {
+      log.error("Failed to create domain '{}': {}.", name, e.getMessage(), e);
+      throw e;
+    }
+  }
+
   void destroyDomain(String name) throws LibvirtException {
     log.debug("Destroying domain '{}'...", name);
     Domain d = connect.domainLookupByName(name);

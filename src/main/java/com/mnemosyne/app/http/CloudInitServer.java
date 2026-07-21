@@ -1,5 +1,6 @@
 package com.mnemosyne.app.http;
 
+import com.mnemosyne.app.model.Server.Seed;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpHandler;
 import com.sun.net.httpserver.HttpServer;
@@ -23,8 +24,20 @@ public class CloudInitServer {
   private static final long POLL_INTERVAL_MS = 5000L;
 
   private static final Map<String, String> userData = new ConcurrentHashMap<>();
+  private static final Map<String, String> metaData = new ConcurrentHashMap<>();
   private static final Map<String, String> networkConfig = new ConcurrentHashMap<>();
   private static final Logger log = LoggerFactory.getLogger(CloudInitServer.class);
+
+  public static void register(Seed seed) {
+    networkConfig.put(seed.name(), seed.networkConfig());
+    userData.put(seed.name(), seed.userData());
+    metaData.put(seed.name(), seed.metaData());
+
+    log.debug("Registered cloud-init configs for '{}'", seed.name());
+    log.trace("user-data for '{}':\n{}", seed.name(), seed.userData());
+    log.trace("network-config for '{}':\n{}", seed.name(), seed.networkConfig());
+    log.trace("meta-data for '{}':\n{}", seed.name(), seed.metaData());
+  }
 
   private static final ExecutorService waiter =
       Executors.newSingleThreadExecutor(
@@ -144,7 +157,7 @@ public class CloudInitServer {
           return userData.get(serverName);
         case "meta-data":
           log.debug("/meta-data requested for '{}'", serverName);
-          return "instance-id: someid/somehostname\n";
+          return metaData.get(serverName);
         case "network-config":
           log.debug("/network-config requested for '{}'", serverName);
           return networkConfig.get(serverName);

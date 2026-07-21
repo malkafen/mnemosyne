@@ -1,5 +1,8 @@
 package com.mnemosyne.app.libvirt;
 
+import com.mnemosyne.app.http.CloudInitServer;
+import com.mnemosyne.app.libvirt.DomainOps.DomainSpec;
+import com.mnemosyne.app.libvirt.StorageOps.VolumeSpec;
 import com.mnemosyne.app.model.DomainState;
 import com.mnemosyne.app.model.Plan;
 import com.mnemosyne.app.model.Server;
@@ -115,6 +118,14 @@ public class Harmonia implements AutoCloseable {
   }
 
   private void create() throws LibvirtException {
-    System.out.println("Create " + plan.getToCreate());
+    for (Server s : plan.getToCreate().values()) {
+      VolumeSpec volSpec =
+          new VolumeSpec(
+              s.getName(), s.getPool(), s.buildVolumeXml(), s.getVolLookup(), s.getDisk());
+      s.setVolPath(storageOps.provisionVolume(volSpec));
+      DomainSpec domainSpec = new DomainSpec(s.getName(), s.buildServerXml(), s.isLaunch());
+      CloudInitServer.register(s.buildSeed());
+      domainOps.setupDomain(domainSpec);
+    }
   }
 }
