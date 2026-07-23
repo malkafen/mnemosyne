@@ -177,5 +177,12 @@
             <version>1.18.36</version>
             <scope>provided</scope>
         </dependency>
+
+       <dependency>
+            <groupId>info.picocli</groupId>
+            <artifactId>picocli</artifactId>
+            <version>4.7.7</version>
+       </dependency>
+
     </dependencies>
 </project>

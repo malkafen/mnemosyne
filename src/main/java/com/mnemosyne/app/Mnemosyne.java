@@ -13,6 +13,8 @@ import java.util.Set;
 import java.util.stream.Collectors;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import picocli.CommandLine;
+import picocli.CommandLine.ParameterException;
 
 class Mnemosyne {
 
@@ -28,8 +30,25 @@ class Mnemosyne {
   public Mnemosyne() {}
 
   public static void main(String[] args) {
+    Config config = new Config();
+    CommandLine cmd = new CommandLine(config);
+
     try {
-      Config config = new Config(args);
+      cmd.parseArgs(args);
+    } catch (ParameterException e) {
+      cmd.getErr().println(e.getMessage());
+      e.getCommandLine().usage(cmd.getErr()); // print usage
+      System.exit(cmd.getCommandSpec().exitCodeOnInvalidInput()); // = 2
+      return;
+    }
+
+    if (cmd.isUsageHelpRequested() || cmd.isVersionHelpRequested()) {
+      if (cmd.isUsageHelpRequested()) cmd.usage(cmd.getOut());
+      else cmd.printVersionHelp(cmd.getOut());
+      return;
+    }
+
+    try {
       new Mnemosyne().run(config);
     } catch (Exception e) {
       log.error("Fatal {}", e.getMessage(), e);
@@ -50,7 +69,7 @@ class Mnemosyne {
       Report.heading("Plan");
       for (Iris i : irides) {
         i.harmonia
-            .plan(i.mnemon().getServers(), config.isDeleteEnabled())
+            .plan(i.mnemon().getServers(), config.isDeleteDisable())
             .print(i.mnemon.getGroup(), config.isJoin());
       }
 
