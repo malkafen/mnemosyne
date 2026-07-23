@@ -50,8 +50,7 @@ class DomainOps {
       log.error(
           "Libvirt operation failed when define for server '{}' (code: {})",
           spec.name(),
-          e.getError() != null ? e.getError().getCode() : "unknown",
-          e);
+          e.getError() != null ? e.getError().getCode() : "unknown");
       throw e;
     }
   }
@@ -62,7 +61,7 @@ class DomainOps {
       d.create();
       log.debug("Domain '{}' has been started successfully.", name);
     } catch (LibvirtException e) {
-      log.error("Failed to create domain '{}': {}.", name, e.getMessage(), e);
+      log.error("Failed to create domain '{}': {}.", name, e.getMessage());
       throw e;
     }
   }
@@ -77,7 +76,7 @@ class DomainOps {
         log.debug("Domain '{}' destroyed successfully", name);
       }
     } catch (LibvirtException e) {
-      log.error("Failed to destroy domain '{}'", name, e);
+      log.error("Failed to destroy domain '{}'", name);
       throw e;
     } finally {
       freeDomainQuietly(d);
@@ -91,7 +90,7 @@ class DomainOps {
       d.undefine();
       log.debug("Domain '{}' undefined successfully", name);
     } catch (LibvirtException e) {
-      log.error("Failed to undefine domain '{}'", name, e);
+      log.error("Failed to undefine domain '{}'", name);
       throw e;
     } finally {
       freeDomainQuietly(d);
@@ -146,7 +145,7 @@ class DomainOps {
       String domainXml = d.getXMLDesc(0);
       diskPaths = XmlUtil.diskPaths(domainXml);
     } catch (LibvirtException e) {
-      log.error("Failed to get XML description for domain '{}'", name, e);
+      log.error("Failed to get XML description for domain '{}'", name);
       throw e;
     } finally {
       if (d != null) freeDomainQuietly(d);
