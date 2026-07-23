@@ -41,9 +41,9 @@ public class Harmonia implements AutoCloseable {
     log.debug("Harmonia connection closed, go to bed");
   }
 
-  public Plan plan(Map<String, Server> servers) throws LibvirtException {
+  public Plan plan(Map<String, Server> servers, boolean deleteEnabled) throws LibvirtException {
     List<DomainState> actual = domainOps.readActualState();
-    this.plan = new Plan(actual, servers);
+    this.plan = new Plan(actual, servers, deleteEnabled);
     return this.plan;
   }
 

@@ -1,7 +1,7 @@
 package com.mnemosyne.app;
 
-import com.mnemosyne.app.config.*;
-import com.mnemosyne.app.http.*;
+import com.mnemosyne.app.config.Config;
+import com.mnemosyne.app.http.CloudInitServer;
 import com.mnemosyne.app.libvirt.Harmonia;
 import com.mnemosyne.app.model.*;
 import com.mnemosyne.app.output.Report;
@@ -49,7 +49,9 @@ class Mnemosyne {
 
       Report.heading("Plan");
       for (Iris i : irides) {
-        i.harmonia.plan(i.mnemon().getServers()).print(i.mnemon.getGroup(), config.isJoin());
+        i.harmonia
+            .plan(i.mnemon().getServers(), config.isDeleteEnabled())
+            .print(i.mnemon.getGroup(), config.isJoin());
       }
 
       if (config.isPlanOnly()) return;
@@ -58,7 +60,7 @@ class Mnemosyne {
       Report.heading("Applied");
       for (Iris i : irides) {
         if (config.isJoin()) i.harmonia.join();
-        else i.harmonia().reconcile(); // <----- we are here
+        else i.harmonia().reconcile();
       }
       log.info("All {} mnemones provisioned. Waiting cloud-init is done...", mnemones.size());
       CloudInitServer.waitForCloudInit().get();

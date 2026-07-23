@@ -7,6 +7,7 @@ public class Config {
   private String serversPath = "/etc/mnemosyne/servers.yml";
   private boolean planOnly = false;
   private boolean join = false;
+  private boolean deleteEnabled = true;
 
   // args mapping
   public Config(String[] args) {
@@ -20,6 +21,9 @@ public class Config {
           break;
         case "--join":
           this.join = true;
+          break;
+        case "--no-delete":
+          this.deleteEnabled = false;
           break;
       }
     }
