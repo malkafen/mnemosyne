@@ -1,9 +1,7 @@
 package com.mnemosyne.app.model;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.mockito.Mockito.*;
 
-import com.mnemosyne.app.config.*;
 import com.mnemosyne.app.testutil.TestData;
 import java.util.List;
 import java.util.Map;
@@ -16,13 +14,11 @@ public class PlanTest {
   @Test
   void plan_buildsCorrectly() {
 
-    // Arange
+    // Arrange
     Map<String, Server> servers = TestData.sampleServers();
     List<DomainState> actual = TestData.sampleDomainStates();
-
     // Act
-    Plan result = new Plan(actual, servers);
-
+    Plan result = new Plan(actual, servers, true);
     // Assert
     assertThat(result.getToCreate().keySet()).containsExactly("toCreate");
     assertThat(result.getToUpdate().keySet()).containsExactly("toUpdate");
@@ -30,6 +26,24 @@ public class PlanTest {
 
     assertThat(result.getToDelete()).containsExactly("toDelete-vm");
     assertThat(result.getToDelete()).doesNotContain("neverToDelete");
+
+    assertThat(result.getUnmanaged()).containsExactly("neverToDelete", "toAdopt");
+  }
+
+  @Test
+  void plan_buildsCorrectly_deleteDisable() {
+
+    // Arrange
+    Map<String, Server> servers = TestData.sampleServers();
+    List<DomainState> actual = TestData.sampleDomainStates();
+    // Act
+    Plan result = new Plan(actual, servers, false);
+    // Assert
+    assertThat(result.getToCreate().keySet()).containsExactly("toCreate");
+    assertThat(result.getToUpdate().keySet()).containsExactly("toUpdate");
+    assertThat(result.getToAdopt().keySet()).containsExactly("toAdopt");
+
+    assertThat(result.getToDelete()).isEmpty();
 
     assertThat(result.getUnmanaged()).containsExactly("neverToDelete", "toAdopt");
   }

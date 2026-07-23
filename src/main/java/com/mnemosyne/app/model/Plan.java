@@ -35,7 +35,7 @@ public final class Plan {
   private final List<String> toDelete;
   private final List<String> unmanaged;
 
-  public Plan(List<DomainState> actual, Map<String, Server> servers) {
+  public Plan(List<DomainState> actual, Map<String, Server> servers, boolean deleteEnabled) {
 
     HashMap<String, DomainState> managedD = new HashMap<>();
     HashMap<String, DomainState> unmanagedD = new HashMap<>();
@@ -61,11 +61,13 @@ public final class Plan {
                 Collectors.toMap(u -> u.actual().serverId(), u -> u, (a, b) -> a, TreeMap::new));
 
     this.toDelete =
-        managedD.values().stream()
-            .filter(d -> !servers.containsKey(d.serverId()))
-            .map(d -> d.name())
-            .sorted()
-            .toList();
+        deleteEnabled
+            ? managedD.values().stream()
+                .filter(d -> !servers.containsKey(d.serverId()))
+                .map(DomainState::name)
+                .sorted()
+                .toList()
+            : List.of();
 
     this.toAdopt =
         servers.entrySet().stream()
