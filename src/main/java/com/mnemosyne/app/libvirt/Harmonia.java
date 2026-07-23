@@ -69,7 +69,7 @@ public class Harmonia implements AutoCloseable {
     report.print(group);
   }
 
-  public void reconcile() throws LibvirtException {
+  public void reconcile() {
     if (this.plan == null) {
       log.debug("[ {} ] nothing to reconcile (no plan)", group);
       return;
@@ -97,11 +97,16 @@ public class Harmonia implements AutoCloseable {
     }
   }
 
-  private void update(Report report) throws LibvirtException {
+  private void update(Report report) {
     for (Plan.Update u : plan.getToUpdate().values()) {
-      if (u.cpuChanged())
-        if (domainOps.updateCpu(u.actual().name(), u.server().getCpu()))
-          report.add("update", "~", u.server().getId(), u.diff() + ", applies after restart");
+      try {
+        if (u.cpuChanged())
+          if (domainOps.updateCpu(u.actual().name(), u.server().getCpu()))
+            report.add("update", "~", u.server().getId(), u.diff() + ", applies after restart");
+      } catch (LibvirtException e) {
+        log.error("[ {} ] update failed for '{}'", group, u.server().getId(), e);
+        report.skip(u.server().getId(), "update failed (see log)");
+      }
     }
   }
 
