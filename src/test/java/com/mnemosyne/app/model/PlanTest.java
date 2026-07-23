@@ -18,7 +18,7 @@ public class PlanTest {
     Map<String, Server> servers = TestData.sampleServers();
     List<DomainState> actual = TestData.sampleDomainStates();
     // Act
-    Plan result = new Plan(actual, servers, true);
+    Plan result = new Plan(actual, servers, false);
     // Assert
     assertThat(result.getToCreate().keySet()).containsExactly("toCreate");
     assertThat(result.getToUpdate().keySet()).containsExactly("toUpdate");
@@ -37,7 +37,7 @@ public class PlanTest {
     Map<String, Server> servers = TestData.sampleServers();
     List<DomainState> actual = TestData.sampleDomainStates();
     // Act
-    Plan result = new Plan(actual, servers, false);
+    Plan result = new Plan(actual, servers, true);
     // Assert
     assertThat(result.getToCreate().keySet()).containsExactly("toCreate");
     assertThat(result.getToUpdate().keySet()).containsExactly("toUpdate");
