@@ -148,8 +148,7 @@ class StorageOps {
       log.error(
           "Failed to resize volume '{}' to {} bytes, rolling back",
           spec.volumeName(),
-          spec.targetCapacity(),
-          e);
+          spec.targetCapacity());
       rollbackVolume(vol, spec);
       throw e;
     }
