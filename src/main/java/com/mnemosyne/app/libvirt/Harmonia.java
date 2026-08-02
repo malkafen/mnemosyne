@@ -129,7 +129,6 @@ public class Harmonia implements AutoCloseable {
     }
   }
 
-  /** Short, human-readable failure cause for the user-facing report (no stack trace). */
   private static String cause(Throwable e) {
     String msg = e.getMessage();
     return (msg == null || msg.isBlank()) ? e.getClass().getSimpleName() : msg.trim();
