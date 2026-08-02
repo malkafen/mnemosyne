@@ -62,8 +62,8 @@ public class Harmonia implements AutoCloseable {
       if (domainOps.joinDomain(s.getName(), s.buildMnemosyneMetadataXml()))
         report.add("join", "+", s.getId(), "");
       else {
-        log.error("[ {} ] join failed for '{}'", group, s.getId());
-        report.skip(s.getId(), "join failed (see log)");
+        log.debug("[ {} ] join failed for '{}'", group, s.getId());
+        report.skip(s.getId(), "join failed (run with -v for details)");
       }
     }
     report.print(group);
@@ -91,8 +91,8 @@ public class Harmonia implements AutoCloseable {
         storageOps.deleteVolumes(diskPaths, name);
         report.add("delete", "-", name, "");
       } catch (LibvirtException | VolumeCleanupException e) {
-        log.error("[ {} ] delete failed for '{}'", group, name, e);
-        report.skip(name, "delete failed (see log)");
+        log.debug("[ {} ] delete failed for '{}'", group, name, e);
+        report.skip(name, "delete failed: " + cause(e));
       }
     }
   }
@@ -104,8 +104,8 @@ public class Harmonia implements AutoCloseable {
           if (domainOps.updateCpu(u.actual().name(), u.server().getCpu()))
             report.add("update", "~", u.server().getId(), u.diff() + ", applies after restart");
       } catch (LibvirtException e) {
-        log.error("[ {} ] update failed for '{}'", group, u.server().getId(), e);
-        report.skip(u.server().getId(), "update failed (see log)");
+        log.debug("[ {} ] update failed for '{}'", group, u.server().getId(), e);
+        report.skip(u.server().getId(), "update failed: " + cause(e));
       }
     }
   }
@@ -122,10 +122,16 @@ public class Harmonia implements AutoCloseable {
         domainOps.setupDomain(domainSpec);
         report.add("create", "+", s.getId(), "");
       } catch (LibvirtException e) {
-        log.error("[ {} ] create failed for '{}'", group, s.getId(), e);
+        log.debug("[ {} ] create failed for '{}'", group, s.getId(), e);
         CloudInitServer.unregister(s.getName());
-        report.skip(s.getId(), "create failed (see log)");
+        report.skip(s.getId(), "create failed: " + cause(e));
       }
     }
+  }
+
+  /** Short, human-readable failure cause for the user-facing report (no stack trace). */
+  private static String cause(Throwable e) {
+    String msg = e.getMessage();
+    return (msg == null || msg.isBlank()) ? e.getClass().getSimpleName() : msg.trim();
   }
 }

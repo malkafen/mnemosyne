@@ -46,7 +46,7 @@ class StorageOps {
         deleted++;
         log.debug("Deleted a volume of domain '{}'", domainName);
       } catch (LibvirtException e) {
-        log.error(
+        log.debug(
             "Failed to delete a volume of domain '{}'; continuing with the rest", domainName, e);
         failed++;
       } finally {
@@ -83,13 +83,13 @@ class StorageOps {
     try {
       pool = connect.storagePoolLookupByName(name);
     } catch (LibvirtException e) {
-      log.error("Storage pool '{}' not found: {}", name, e.getMessage());
+      log.debug("Storage pool '{}' not found: {}", name, e.getMessage(), e);
       throw e;
     }
     try {
       pool.refresh(0);
     } catch (LibvirtException e) {
-      log.error("Storage pool '{}' found, but refresh failed: {}", name, e.getMessage());
+      log.debug("Storage pool '{}' found, but refresh failed: {}", name, e.getMessage(), e);
       freePoolQuietly(pool);
       throw e;
     }
@@ -111,7 +111,7 @@ class StorageOps {
         log.debug("Volume '{}' doesn't exist", domainName);
         return Optional.empty();
       }
-      log.error("Failed to lookup volume '{}': {}", domainName, e.getMessage());
+      log.debug("Failed to lookup volume '{}': {}", domainName, e.getMessage(), e);
       throw e;
     } finally {
       if (vol != null) freeVolumeQuietly(vol);
@@ -145,10 +145,11 @@ class StorageOps {
     try {
       vol.resize(spec.targetCapacity(), 0);
     } catch (LibvirtException e) {
-      log.error(
+      log.debug(
           "Failed to resize volume '{}' to {} bytes, rolling back",
           spec.volumeName(),
-          spec.targetCapacity());
+          spec.targetCapacity(),
+          e);
       rollbackVolume(vol, spec);
       throw e;
     }
@@ -160,7 +161,7 @@ class StorageOps {
       vol.delete(0);
       log.debug("Rollback successful: volume '{}' deleted", spec.volumeName());
     } catch (LibvirtException e) {
-      log.error(
+      log.debug(
           "Rollback failed: could not delete volume '{}': {}",
           spec.volumeName(),
           e.getMessage(),
