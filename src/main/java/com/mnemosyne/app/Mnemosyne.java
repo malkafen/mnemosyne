@@ -6,6 +6,8 @@ import com.mnemosyne.app.libvirt.Harmonia;
 import com.mnemosyne.app.model.*;
 import com.mnemosyne.app.output.Report;
 import jakarta.validation.*;
+import java.io.PrintStream;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
@@ -30,6 +32,9 @@ class Mnemosyne {
   public Mnemosyne() {}
 
   public static void main(String[] args) {
+    // Keep the user-facing report (stdout) readable regardless of the console's default charset.
+    System.setOut(new PrintStream(System.out, true, StandardCharsets.UTF_8));
+
     Config config = new Config();
     CommandLine cmd = new CommandLine(config);
 
@@ -47,6 +52,8 @@ class Mnemosyne {
       else cmd.printVersionHelp(cmd.getOut());
       return;
     }
+
+    if (config.isVerbose()) enableDebugLogging();
 
     try {
       new Mnemosyne().run(config);
@@ -85,6 +92,13 @@ class Mnemosyne {
       CloudInitServer.waitForCloudInit().get();
     } finally {
       shutdown();
+    }
+  }
+
+  private static void enableDebugLogging() {
+    org.slf4j.Logger root = LoggerFactory.getLogger(Logger.ROOT_LOGGER_NAME);
+    if (root instanceof ch.qos.logback.classic.Logger logbackRoot) {
+      logbackRoot.setLevel(ch.qos.logback.classic.Level.DEBUG);
     }
   }
 

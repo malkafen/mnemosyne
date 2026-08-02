@@ -47,10 +47,11 @@ class DomainOps {
       Domain d = connect.domainDefineXML(spec.domainXml());
       return d;
     } catch (LibvirtException e) {
-      log.error(
+      log.debug(
           "Libvirt operation failed when define for server '{}' (code: {})",
           spec.name(),
-          e.getError() != null ? e.getError().getCode() : "unknown");
+          e.getError() != null ? e.getError().getCode() : "unknown",
+          e);
       throw e;
     }
   }
@@ -61,7 +62,7 @@ class DomainOps {
       d.create();
       log.debug("Domain '{}' has been started successfully.", name);
     } catch (LibvirtException e) {
-      log.error("Failed to create domain '{}': {}.", name, e.getMessage());
+      log.debug("Failed to create domain '{}': {}.", name, e.getMessage(), e);
       throw e;
     }
   }
@@ -76,7 +77,7 @@ class DomainOps {
         log.debug("Domain '{}' destroyed successfully", name);
       }
     } catch (LibvirtException e) {
-      log.error("Failed to destroy domain '{}'", name);
+      log.debug("Failed to destroy domain '{}'", name, e);
       throw e;
     } finally {
       freeDomainQuietly(d);
@@ -90,7 +91,7 @@ class DomainOps {
       d.undefine();
       log.debug("Domain '{}' undefined successfully", name);
     } catch (LibvirtException e) {
-      log.error("Failed to undefine domain '{}'", name);
+      log.debug("Failed to undefine domain '{}'", name, e);
       throw e;
     } finally {
       freeDomainQuietly(d);
@@ -131,7 +132,7 @@ class DomainOps {
 
       return true;
     } catch (LibvirtException e) {
-      log.error("Failed to join domain '{}'", name, e);
+      log.debug("Failed to join domain '{}'", name, e);
       return false;
     } finally {
       if (d != null) freeDomainQuietly(d);
@@ -145,7 +146,7 @@ class DomainOps {
       String domainXml = d.getXMLDesc(0);
       diskPaths = XmlUtil.diskPaths(domainXml);
     } catch (LibvirtException e) {
-      log.error("Failed to get XML description for domain '{}'", name);
+      log.debug("Failed to get XML description for domain '{}'", name, e);
       throw e;
     } finally {
       if (d != null) freeDomainQuietly(d);
@@ -167,7 +168,7 @@ class DomainOps {
       log.debug("Domain '{}': cpu updated (applies after restart)", name);
       return true;
     } catch (LibvirtException e) {
-      log.error("Failed to update cpu for domain '{}'", name);
+      log.debug("Failed to update cpu for domain '{}'", name, e);
       throw e;
     } finally {
       freeDomainQuietly(d);

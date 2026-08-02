@@ -32,4 +32,9 @@ public class Config {
       names = "--no-delete",
       description = "Skip deletion of managed domains absent from the inventory.")
   private boolean deleteDisable = false;
+
+  @Option(
+      names = {"--verbose", "-v"},
+      description = "Enable debug logging (full stack traces on failure).")
+  private boolean verbose = false;
 }

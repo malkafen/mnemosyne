@@ -54,7 +54,7 @@
         </filter>
     </appender>
 
-    <root level="${logging.level.root:-DEBUG}">
+    <root level="${logging.level.root:-${LOG_LEVEL:-INFO}}">
         <appender-ref ref="CONSOLE"/>
         <appender-ref ref="CONSOLE_ERR"/>
         <appender-ref ref="CONSOLE_DEBUG"/>
