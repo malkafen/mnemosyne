@@ -5,7 +5,7 @@
 
     <groupId>com.mnemosyne.app</groupId>
     <artifactId>mnemosyne</artifactId>
-    <version>0.1.1</version>
+    <version>0.1.2</version>
 
     <properties>
         <maven.compiler.source>17</maven.compiler.source>
@@ -21,6 +21,24 @@
     </licenses>
 
     <build>
+        <resources>
+            <!-- Only mnemosyne.properties is filtered, so it can carry ${project.version} -->
+            <resource>
+                <directory>src/main/resources</directory>
+                <filtering>true</filtering>
+                <includes>
+                    <include>mnemosyne.properties</include>
+                </includes>
+            </resource>
+            <resource>
+                <directory>src/main/resources</directory>
+                <filtering>false</filtering>
+                <excludes>
+                    <exclude>mnemosyne.properties</exclude>
+                </excludes>
+            </resource>
+        </resources>
+
         <plugins>
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>

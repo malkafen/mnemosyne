@@ -1,16 +1,34 @@
 package com.mnemosyne.app.config;
 
+import java.io.InputStream;
+import java.util.Properties;
 import lombok.Getter;
 import picocli.CommandLine.Command;
+import picocli.CommandLine.IVersionProvider;
 import picocli.CommandLine.Option;
 
 @Getter
 @Command(
     name = "mnemosyne",
     mixinStandardHelpOptions = true, // auto add -h/--help and -V/--version
-    version = "mnemosyne 0.1.1",
+    versionProvider = Config.PomVersionProvider.class,
     description = "Declarative libvirt/KVM VM provisioner.")
 public class Config {
+
+  /** Reads the version from mnemosyne.properties, filled in by Maven at build time. */
+  static class PomVersionProvider implements IVersionProvider {
+
+    @Override
+    public String[] getVersion() throws Exception {
+      Properties props = new Properties();
+      try (InputStream in = Config.class.getResourceAsStream("/mnemosyne.properties")) {
+        if (in != null) {
+          props.load(in);
+        }
+      }
+      return new String[] {"mnemosyne " + props.getProperty("version", "unknown")};
+    }
+  }
 
   @Option(
       names = {"--servers-file", "-f"},
