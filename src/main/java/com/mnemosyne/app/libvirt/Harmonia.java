@@ -118,7 +118,7 @@ public class Harmonia implements AutoCloseable {
                 s.getName(), s.getPool(), s.buildVolumeXml(), s.getVolLookup(), s.getDisk());
         s.setVolPath(storageOps.provisionVolume(volSpec));
         DomainSpec domainSpec = new DomainSpec(s.getName(), s.buildServerXml(), s.isLaunch());
-        CloudInitServer.register(s.buildSeed());
+        if (s.isLaunch()) CloudInitServer.register(s.buildSeed());
         domainOps.setupDomain(domainSpec);
         report.add("create", "+", s.getId(), "");
       } catch (LibvirtException e) {
