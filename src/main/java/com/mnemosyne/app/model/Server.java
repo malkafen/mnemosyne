@@ -9,6 +9,7 @@ import jakarta.validation.constraints.*;
 import java.io.File;
 import java.io.IOException;
 import java.io.StringWriter;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import javax.xml.parsers.DocumentBuilder;
@@ -85,6 +86,11 @@ public class Server {
 
   public Seed buildSeed() {
     return new Seed(getName(), buildMetaData(), buildUserDataYaml(), buildNetworkConfigYaml());
+  }
+
+  private String seedUrl() {
+    String base = metaUrl.endsWith("/") ? metaUrl : metaUrl + "/";
+    return base + getName() + "/";
   }
 
   public static String specHash(int cpu, long ram) {
@@ -174,7 +180,7 @@ public class Server {
     for (int i = 0; i < entries.getLength(); i++) {
       Element entry = (Element) entries.item(i);
       if ("serial".equals(entry.getAttribute("name"))) {
-        entry.setTextContent("ds=nocloud;s=" + this.metaUrl + getName() + "/");
+        entry.setTextContent("ds=nocloud;s=" + seedUrl());
         break;
       }
     }
@@ -220,10 +226,17 @@ public class Server {
   }
 
   public String buildUserDataYaml() {
+    Map<String, Object> phoneHome = new LinkedHashMap<>();
+    phoneHome.put("url", seedUrl() + "phone-home");
+    phoneHome.put("post", List.of("instance_id", "hostname", "fqdn"));
+    phoneHome.put("tries", 10);
+
     try {
       Map<String, Object> yaml = loadYamlTemplate(this.templates.getUserDataTmpl());
       yaml.put("hostname", getName());
       yaml.put("fqdn", getName());
+      yaml.put("phone_home", phoneHome);
+
       /* Map<String, Object> network = (Map<String, Object>) yaml.get("network");
       Map<String, Object> ethernets = (Map<String, Object>) network.get("ethernets");
       Map<String, Object> enp1s0 = (Map<String, Object>) ethernets.get("enp1s0");

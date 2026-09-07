@@ -58,7 +58,8 @@ class Mnemosyne {
     try {
       new Mnemosyne().run(config);
     } catch (Exception e) {
-      log.error("Fatal: {}", e.getMessage());
+      Throwable root = getRootCause(e);
+      log.error("Fatal: {} (cause: {})", e.getMessage(), root.getMessage());
       log.debug("Fatal error details", e);
       System.exit(1);
     }
@@ -90,7 +91,9 @@ class Mnemosyne {
         else i.harmonia().reconcile();
       }
       log.info("All {} mnemones provisioned. Waiting cloud-init is done...", mnemones.size());
-      CloudInitServer.waitForCloudInit().get();
+      if (!CloudInitServer.waitForCloudInit().get()) {
+        log.error("cloud-init did not finish on all servers — see warnings above");
+      }
     } finally {
       shutdown();
     }
@@ -151,6 +154,14 @@ class Mnemosyne {
     log.debug("Stopping CloudInitServer...");
     CloudInitServer.stop();
     log.debug("CloudInitServer stopped");
+  }
+
+  private static Throwable getRootCause(Throwable t) {
+    Throwable cause = t;
+    while (cause.getCause() != null && cause.getCause() != cause) {
+      cause = cause.getCause();
+    }
+    return cause;
   }
   // EndClass
 }
