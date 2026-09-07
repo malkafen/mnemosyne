@@ -83,13 +83,14 @@ public class Harmonia implements AutoCloseable {
 
   // Reconcile methods
   private void delete(Report report) {
-    for (String name : plan.getToDelete()) {
+    for (String name : plan.getToDelete().keySet()) {
+      List<String> diskPaths = plan.getToDelete().get(name);
       try {
-        List<String> diskPaths = domainOps.getDiskPaths(name);
         domainOps.destroyDomain(name);
         domainOps.undefineDomain(name);
         storageOps.deleteVolumes(diskPaths, name);
-        report.add("delete", "-", name, "");
+        report.add("delete", "-", name, diskPaths.isEmpty() ? "no disks" : "");
+        report.sub(diskPaths);
       } catch (LibvirtException | VolumeCleanupException e) {
         log.debug("[ {} ] delete failed for '{}'", group, name, e);
         report.skip(name, "delete failed: " + cause(e));

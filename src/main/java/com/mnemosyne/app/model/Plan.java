@@ -29,10 +29,25 @@ public final class Plan {
     }
   }
 
+  /**
+   * Servers from config whose name matches an existing unmanaged domain, keyed by server id;
+   * adopting takes over that domain.
+   */
   private final Map<String, Server> toAdopt;
+
+  /** Managed domains whose live CPU differs from config, keyed by server id. */
   private final Map<String, Update> toUpdate;
+
+  /**
+   * Servers from config with no matching domain (managed or adoptable), keyed by server id; to be
+   * created.
+   */
   private final Map<String, Server> toCreate;
-  private final List<String> toDelete;
+
+  /** Managed domains absent from config, keyed by VM name, mapped to their disks to delete. */
+  private final Map<String, List<String>> toDelete;
+
+  /** Names of all unmanaged domains, including adoptable ones. */
   private final List<String> unmanaged;
 
   public Plan(List<DomainState> actual, Map<String, Server> servers, boolean deleteDisable) {
@@ -64,10 +79,8 @@ public final class Plan {
         !deleteDisable
             ? managedD.values().stream()
                 .filter(d -> !servers.containsKey(d.serverId()))
-                .map(DomainState::name)
-                .sorted()
-                .toList()
-            : List.of();
+                .collect(Collectors.toMap(d -> d.name(), d -> d.disks(), (a, b) -> a, TreeMap::new))
+            : Map.of();
 
     this.toAdopt =
         servers.entrySet().stream()
@@ -95,7 +108,11 @@ public final class Plan {
       return;
     }
 
-    toDelete.forEach(n -> report.add("delete", "-", n, ""));
+    toDelete.forEach(
+        (n, disks) -> {
+          report.add("delete", "-", n, disks.isEmpty() ? "no disks" : "");
+          report.sub(disks);
+        });
     toUpdate.forEach((id, u) -> report.add("update", "~", id, u.diff()));
     toCreate.keySet().forEach(n -> report.add("create", "+", n, ""));
     report.print(group, "no changes");

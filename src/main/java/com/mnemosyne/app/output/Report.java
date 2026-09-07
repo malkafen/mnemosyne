@@ -25,6 +25,11 @@ public final class Report {
     lines.add(line(marker, name, detail));
   }
 
+  /** Continuation lines under the previous entry; not counted in the summary. */
+  public void sub(List<String> items) {
+    items.forEach(i -> lines.add(String.format("      %s", i)));
+  }
+
   public void skip(String name, String reason) {
     skipped++;
     lines.add(line(SKIP_MARKER, name, reason));

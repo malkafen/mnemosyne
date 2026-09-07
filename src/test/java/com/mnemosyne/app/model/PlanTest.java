@@ -1,6 +1,7 @@
 package com.mnemosyne.app.model;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.entry;
 
 import com.mnemosyne.app.testutil.TestData;
 import java.util.List;
@@ -24,8 +25,10 @@ public class PlanTest {
     assertThat(result.getToUpdate().keySet()).containsExactly("toUpdate");
     assertThat(result.getToAdopt().keySet()).containsExactly("toAdopt");
 
-    assertThat(result.getToDelete()).containsExactly("toDelete-vm");
-    assertThat(result.getToDelete()).doesNotContain("neverToDelete");
+    assertThat(result.getToDelete().keySet()).containsExactly("toDelete-vm");
+    assertThat(result.getToDelete()).containsExactly(entry("toDelete-vm", TestData.DISKPATHS));
+
+    assertThat(result.getToDelete()).doesNotContainKey("neverToDelete");
 
     assertThat(result.getUnmanaged()).containsExactly("neverToDelete", "toAdopt");
   }

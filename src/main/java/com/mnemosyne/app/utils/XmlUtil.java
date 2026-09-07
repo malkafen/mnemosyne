@@ -64,7 +64,7 @@ public class XmlUtil {
 
       Element meta = firstNS(doc, MNEM_NS, "mnemosyne");
       if (meta == null) {
-        return new DomainState(name, cpu, ram, null, null, null);
+        return new DomainState(name, cpu, ram, null, null, null, diskPaths(doc));
       }
 
       return new DomainState(
@@ -74,7 +74,8 @@ public class XmlUtil {
           textNS(meta, MNEM_NS, "serverId"),
           // textNS(meta, MNEM_NS, "specHash"),
           textNS(meta, MNEM_NS, "specVersion"),
-          textNS(meta, MNEM_NS, "managedBy"));
+          textNS(meta, MNEM_NS, "managedBy"),
+          diskPaths(doc));
     } catch (ParserConfigurationException | SAXException | IOException e) {
       throw new XmlParseException("Failed to parse domain XML", e);
     }
@@ -83,26 +84,29 @@ public class XmlUtil {
   public static List<String> diskPaths(String domainXml) {
     try {
       Document doc = parse(domainXml);
-      List<String> paths = new ArrayList<>();
-
-      NodeList disks = doc.getElementsByTagName("disk");
-      for (int i = 0; i < disks.getLength(); i++) {
-        Element disk = (Element) disks.item(i);
-        if (!"disk".equals(disk.getAttribute("device"))) {
-          continue;
-        }
-        Element source = (Element) disk.getElementsByTagName("source").item(0);
-        if (source == null) {
-          continue;
-        }
-        String file = source.getAttribute("file");
-        if (!file.isBlank()) {
-          paths.add(file);
-        }
-      }
-      return paths;
+      return diskPaths(doc);
     } catch (ParserConfigurationException | SAXException | IOException e) {
       throw new XmlParseException("Failed to parse domain XML", e);
     }
+  }
+
+  private static List<String> diskPaths(Document doc) {
+    List<String> paths = new ArrayList<>();
+    NodeList disks = doc.getElementsByTagName("disk");
+    for (int i = 0; i < disks.getLength(); i++) {
+      Element disk = (Element) disks.item(i);
+      if (!"disk".equals(disk.getAttribute("device"))) {
+        continue;
+      }
+      Element source = (Element) disk.getElementsByTagName("source").item(0);
+      if (source == null) {
+        continue;
+      }
+      String file = source.getAttribute("file");
+      if (!file.isBlank()) {
+        paths.add(file);
+      }
+    }
+    return paths;
   }
 }
