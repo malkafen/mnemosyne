@@ -17,10 +17,9 @@ COPY ./templates/server.xml \
      ./templates/network-config.yml \
      ./templates/meta-data.yml \
      /app/templates/
-COPY ./configs/logback.xml /app/configs/logback.xml
+
 COPY --from=build /app/target/mnemosyne-*.jar /app/mnemosyne.jar
 
 VOLUME ["/etc/mnemosyne"]
 
-ENTRYPOINT ["java", "-Dlogback.configurationFile=/app/configs/logback.xml", \
-            "-jar", "/app/mnemosyne.jar"]
+ENTRYPOINT ["java", "-jar", "/app/mnemosyne.jar"]
