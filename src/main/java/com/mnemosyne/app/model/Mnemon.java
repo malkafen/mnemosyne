@@ -63,9 +63,19 @@ public class Mnemon {
     List<Mnemon> mnemones =
         mapper.readValue(
             file, mapper.getTypeFactory().constructCollectionType(List.class, Mnemon.class));
-    log.debug("Loaded {} servers", mnemones.size());
+
+    // An empty document deserializes to null, not to an empty list.
+    if (mnemones == null || mnemones.isEmpty()) {
+      throw new IllegalArgumentException("Inventory is empty or defines no groups: " + path);
+    }
+
+    log.debug("Loaded {} groups", mnemones.size());
 
     for (Mnemon m : mnemones) {
+      // Nothing to enrich, and nothing to report here: @NotNull on 'servers' does that
+      // in the validation pass that follows.
+      if (m.getServers() == null) continue;
+
       Templates groupTmpl = m.getTemplates();
       m.getServers()
           .forEach(
