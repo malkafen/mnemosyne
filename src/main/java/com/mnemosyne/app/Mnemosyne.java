@@ -58,7 +58,8 @@ class Mnemosyne {
     try {
       new Mnemosyne().run(config);
     } catch (Exception e) {
-      log.error("Fatal {}", e.getMessage(), e);
+      log.error("Fatal: {}", e.getMessage());
+      log.debug("Fatal error details", e);
       System.exit(1);
     }
   }
