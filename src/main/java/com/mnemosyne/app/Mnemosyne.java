@@ -66,7 +66,6 @@ class Mnemosyne {
   public void run(Config config) throws Exception {
     initValidator();
     mnemones = loadAndValidate(config);
-    CloudInitServer.start();
     try {
       for (Mnemon m : mnemones) {
         Harmonia h = new Harmonia(m.getGroup(), m.getUser(), m.getKey(), m.getHost(), m.getPort());
@@ -81,6 +80,7 @@ class Mnemosyne {
       }
 
       if (config.isPlanOnly()) return;
+      CloudInitServer.start();
       confirmWindow();
 
       Report.heading("Applied");
