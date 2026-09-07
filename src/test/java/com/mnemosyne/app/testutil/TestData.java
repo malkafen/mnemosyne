@@ -17,6 +17,8 @@ public final class TestData {
   private static final int testRam = 4096;
   private static final String testIp = "192.168.70.70/24";
   private static final String testGateway = "192.168.70.1";
+  public static final List<String> DISKPATHS =
+      List.of("/var/lib/libvirt/images/toDelete-vm", "/var/lib/libvirt/images/test-data");
 
   private static Server ServerFactory(String name) {
     Server s = new Server();
@@ -42,9 +44,11 @@ public final class TestData {
   public static List<DomainState> sampleDomainStates() {
     return new ArrayList<>(
         List.of(
-            new DomainState("toUpdate", testCpu + 1, testRam, "toUpdate", "1", "mnemosyne"),
-            new DomainState("toDelete-vm", testCpu, testRam, "toDelete-id", "1", "mnemosyne"),
-            new DomainState("neverToDelete", testCpu, testRam, null, null, null),
-            new DomainState("toAdopt", testCpu, testRam, null, null, null)));
+            new DomainState(
+                "toUpdate", testCpu + 1, testRam, "toUpdate", "1", "mnemosyne", List.of()),
+            new DomainState(
+                "toDelete-vm", testCpu, testRam, "toDelete-id", "1", "mnemosyne", DISKPATHS),
+            new DomainState("neverToDelete", testCpu, testRam, null, null, null, List.of()),
+            new DomainState("toAdopt", testCpu, testRam, null, null, null, List.of())));
   }
 }
