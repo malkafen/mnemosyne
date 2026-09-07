@@ -8,31 +8,35 @@ import java.io.IOException;
 import java.io.OutputStream;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 public class CloudInitServer {
 
+  private static HttpServer server;
   private static final int PORT = 8080;
   private static final String CONTEXT_PATH = "/cloud-init";
-  private static final int MAX_ATTEMPTS = 20;
   private static final long POLL_INTERVAL_MS = 5000L;
+  private static final long WAIT_TIMEOUT_MS = Duration.ofMinutes(5).toMillis();
 
-  private static final Map<String, String> userData = new ConcurrentHashMap<>();
-  private static final Map<String, String> metaData = new ConcurrentHashMap<>();
-  private static final Map<String, String> networkConfig = new ConcurrentHashMap<>();
+  private static final Map<String, Seed> seeds = new ConcurrentHashMap<>();
+  private static final Set<String> fetched = ConcurrentHashMap.newKeySet();
+  private static final Set<String> done = ConcurrentHashMap.newKeySet();
+
   private static final Logger log = LoggerFactory.getLogger(CloudInitServer.class);
 
   public static void register(Seed seed) {
-    networkConfig.put(seed.name(), seed.networkConfig());
-    userData.put(seed.name(), seed.userData());
-    metaData.put(seed.name(), seed.metaData());
-
+    seeds.put(seed.name(), seed);
+    fetched.remove(seed.name());
+    done.remove(seed.name());
     log.debug("Registered cloud-init configs for '{}'", seed.name());
     log.trace("user-data for '{}':\n{}", seed.name(), seed.userData());
     log.trace("network-config for '{}':\n{}", seed.name(), seed.networkConfig());
@@ -40,9 +44,9 @@ public class CloudInitServer {
   }
 
   public static void unregister(String name) {
-    networkConfig.remove(name);
-    userData.remove(name);
-    metaData.remove(name);
+    seeds.remove(name);
+    fetched.remove(name);
+    done.remove(name);
     log.debug("Unregistered cloud-init configs for '{}'", name);
   }
 
@@ -54,43 +58,38 @@ public class CloudInitServer {
             return t;
           });
 
-  private static HttpServer server;
-  private static int stopCounter;
-
-  public static int getUserDataSize() {
-    return userData.size();
-  }
-
-  public static int getStopCounter() {
-    return stopCounter;
-  }
-
-  public static void increaseStopCounter() {
-    stopCounter++;
-  }
-
   public static Future<Boolean> waitForCloudInit() {
     return waiter.submit(CloudInitServer::pollCloudInit);
   }
 
   private static boolean pollCloudInit() throws InterruptedException {
-    for (int attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
-      int done = stopCounter;
-      int total = userData.size();
-      log.debug("Cloud-init progress: {}/{}, attempt {}/{}", done, total, attempt, MAX_ATTEMPTS);
+    long deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(WAIT_TIMEOUT_MS);
 
-      if (done == total) {
-        log.info("All cloud-init tasks completed ({}/{}).", done, total);
-        return true;
+    while (!done.containsAll(seeds.keySet())) {
+      if (System.nanoTime() >= deadline) {
+        reportTimeout();
+        return false;
       }
+      log.debug("cloud-init finished on {}/{} servers", done.size(), seeds.size());
       Thread.sleep(POLL_INTERVAL_MS);
     }
+    log.info("cloud-init finished on all {} servers", seeds.size());
+    return true;
+  }
+
+  private static void reportTimeout() {
     log.warn(
-        "Timeout reached ({} attempts). Cloud-init not fully completed ({}/{})",
-        MAX_ATTEMPTS,
-        stopCounter,
-        userData.size());
-    return false;
+        "Timeout after {} min — cloud-init finished on {}/{} servers",
+        WAIT_TIMEOUT_MS / 60_000,
+        done.size(),
+        seeds.size());
+    for (String name : seeds.keySet()) {
+      if (done.contains(name)) continue;
+      log.warn(
+          "  '{}' — {}",
+          name,
+          fetched.contains(name) ? "seed fetched, no phone_home" : "seed was never fetched");
+    }
   }
 
   public static void start() throws IOException {
@@ -127,42 +126,35 @@ public class CloudInitServer {
       String serverName = parts[2];
       String filename = parts[3];
 
-      if (userData.get(serverName) == null) {
-        log.debug("Config not found for '{}'", serverName);
+      Seed seed = seeds.get(serverName);
+      if (seed == null) {
+        log.info("Seed not found for '{}'", serverName);
         sendResponse(exchange, 404, "VM Config not found");
         return;
       }
 
-      String content = resolveContent(serverName, filename);
-      if (content == null) {
-        // vendor-data and anything else: acknowledge and count as a completed request
-        sendResponse(exchange, 200, "");
-        log.debug("There was a request requested '/{}' for '{}'", filename, serverName);
-        increaseStopCounter();
+      if ("phone-home".equals(filename)) {
+        handlePhoneHome(exchange, serverName);
         return;
       }
 
-      sendResponse(exchange, 200, content);
-    }
+      log.debug("Metadata request: server={}, filename={}", serverName, filename);
+      String content =
+          switch (filename) {
+            case "meta-data" -> seed.metaData();
+            case "user-data" -> seed.userData();
+            case "network-config" -> seed.networkConfig();
+            case "vendor-data" -> "";
+            default -> null;
+          };
 
-    /**
-     * @return the response body for a known cloud-init file, or {@code null} for unhandled files
-     *     (vendor-data, etc.).
-     */
-    private String resolveContent(String serverName, String filename) {
-      switch (filename) {
-        case "user-data":
-          log.debug("/user-data requested for '{}'", serverName);
-          return userData.get(serverName);
-        case "meta-data":
-          log.debug("/meta-data requested for '{}'", serverName);
-          return metaData.get(serverName);
-        case "network-config":
-          log.debug("/network-config requested for '{}'", serverName);
-          return networkConfig.get(serverName);
-        default:
-          return null;
+      if (content == null) {
+        sendResponse(exchange, 404, "");
+        log.error("Unknown filename '{}' requested for server '{}'", filename, serverName);
+        return;
       }
+      fetched.add(serverName);
+      sendResponse(exchange, 200, content);
     }
 
     private void sendResponse(HttpExchange exchange, int statusCode, String response)
@@ -172,6 +164,23 @@ public class CloudInitServer {
       try (OutputStream os = exchange.getResponseBody()) {
         os.write(bytes);
       }
+    }
+
+    private void handlePhoneHome(HttpExchange exchange, String serverName) throws IOException {
+      if (!"POST".equals(exchange.getRequestMethod())) {
+        exchange.getResponseHeaders().set("Allow", "POST");
+        sendResponse(exchange, 405, "phone_home must be POSTed");
+        return;
+      }
+      // The form body (instance_id, hostname, fqdn) must be read before responding: an
+      // unread request body breaks the connection, and cloud-init will count the attempt as failed.
+      String body = new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
+
+      if (done.add(serverName)) log.debug("cloud-init finished on '{}'", serverName);
+      else log.debug("Repeated phone_home from '{}'", serverName);
+      log.trace("phone_home body from '{}': {}", serverName, body);
+
+      sendResponse(exchange, 200, "");
     }
   }
 }
