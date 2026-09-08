@@ -24,6 +24,7 @@ public class CloudInitServer {
   private static HttpServer server;
   private static final int PORT = 8080;
   private static final String CONTEXT_PATH = "/cloud-init";
+  private static final int HTTP_WORKERS = 4;
   private static final long POLL_INTERVAL_MS = 5000L;
   private static final long WAIT_TIMEOUT_MS = Duration.ofMinutes(5).toMillis();
 
@@ -49,6 +50,8 @@ public class CloudInitServer {
     done.remove(name);
     log.debug("Unregistered cloud-init configs for '{}'", name);
   }
+
+  private static ExecutorService httpWorkers;
 
   private static final ExecutorService waiter =
       Executors.newSingleThreadExecutor(
@@ -95,7 +98,15 @@ public class CloudInitServer {
   public static void start() throws IOException {
     server = HttpServer.create(new InetSocketAddress(PORT), 0);
     server.createContext(CONTEXT_PATH, new CloudInitHandler());
-    server.setExecutor(null); // default executor
+    httpWorkers =
+        Executors.newFixedThreadPool(
+            HTTP_WORKERS,
+            r -> {
+              Thread t = new Thread(r, "cloud-init-http");
+              t.setDaemon(true);
+              return t;
+            });
+    server.setExecutor(httpWorkers);
     server.start();
     log.info("Cloud-Init server is running on port '{}'", PORT);
   }
@@ -107,6 +118,7 @@ public class CloudInitServer {
       return;
     }
     server.stop(0);
+    if (httpWorkers != null) httpWorkers.shutdownNow();
     log.info("Cloud-Init Server has been stopped.");
   }
 
@@ -119,7 +131,7 @@ public class CloudInitServer {
       // Expected path: /cloud-init/<serverName>/<filename>
       String[] parts = exchange.getRequestURI().getPath().split("/");
       if (parts.length < 4) {
-        sendResponse(exchange, 200, "Invalid path");
+        sendResponse(exchange, 404, "Invalid path");
         return;
       }
 
