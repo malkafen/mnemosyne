@@ -157,10 +157,11 @@ mvn clean package
 
 Создаётся объединённый (shaded) uber-jar: `target/mnemosyne-<версия>.jar`.
 
-Форматирование кода перед push:
+Форматирование кода перед push (CI не примет неотформатированный код):
 
 ```bash
-find src/main/java -name "*.java" | xargs java -jar google-java-format-*-all-deps.jar -i
+mvn spotless:apply   # переформатировать файлы по google-java-format
+mvn spotless:check   # только проверить -- именно это запускает CI
 ```
 
 ---

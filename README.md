@@ -155,10 +155,11 @@ mvn clean package
 
 This produces a shaded uber-jar at `target/mnemosyne-<version>.jar`.
 
-Format the code before pushing:
+Format the code before pushing (CI rejects unformatted code):
 
 ```bash
-find src/main/java -name "*.java" | xargs java -jar google-java-format-*-all-deps.jar -i
+mvn spotless:apply   # rewrite files with google-java-format
+mvn spotless:check   # verify only -- this is what CI runs
 ```
 
 ---
