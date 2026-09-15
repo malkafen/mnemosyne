@@ -11,7 +11,8 @@
     </mnem:mnemosyne>
   </metadata>
 
-  <memory unit='MiB'></memory>
+  <!-- unit and value are both rewritten by Mnemosyne; domain XML is KiB throughout -->
+  <memory unit='KiB'></memory>
   <vcpu></vcpu>
 
   <os>

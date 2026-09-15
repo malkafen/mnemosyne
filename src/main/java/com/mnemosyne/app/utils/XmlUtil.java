@@ -4,12 +4,19 @@ import com.mnemosyne.app.exception.*;
 import com.mnemosyne.app.model.DomainState;
 import java.io.IOException;
 import java.io.StringReader;
+import java.io.StringWriter;
 import java.util.ArrayList;
 import java.util.List;
 import javax.xml.XMLConstants;
 import javax.xml.parsers.DocumentBuilder;
 import javax.xml.parsers.DocumentBuilderFactory;
 import javax.xml.parsers.ParserConfigurationException;
+import javax.xml.transform.OutputKeys;
+import javax.xml.transform.Transformer;
+import javax.xml.transform.TransformerException;
+import javax.xml.transform.TransformerFactory;
+import javax.xml.transform.dom.DOMSource;
+import javax.xml.transform.stream.StreamResult;
 import org.w3c.dom.Document;
 import org.w3c.dom.Element;
 import org.w3c.dom.NodeList;
@@ -53,6 +60,14 @@ public class XmlUtil {
 
   public static final String MNEM_NS = "https://mnemosyne.dev/schema/v1";
 
+  /**
+   * Memory in domain XML is always KiB — libvirt normalizes every {@code <memory>} element to KiB
+   * on define, so Mnemosyne writes KiB too and never has to trust the {@code unit} attribute it
+   * reads back. The inventory and {@link com.mnemosyne.app.model.Server} stay in MiB; this is the
+   * only place the two meet.
+   */
+  public static final long KIB_PER_MIB = 1024L;
+
   public static DomainState getShortState(String domainXml) {
 
     try {
@@ -60,7 +75,7 @@ public class XmlUtil {
 
       String name = firstText(doc, "name");
       int cpu = Integer.parseInt(firstText(doc, "vcpu").trim());
-      long ram = Long.parseLong(firstText(doc, "memory").trim()) / 1024;
+      long ram = Long.parseLong(firstText(doc, "memory").trim()) / KIB_PER_MIB;
 
       Element meta = firstNS(doc, MNEM_NS, "mnemosyne");
       if (meta == null) {
@@ -78,6 +93,53 @@ public class XmlUtil {
           diskPaths(doc));
     } catch (ParserConfigurationException | SAXException | IOException e) {
       throw new XmlParseException("Failed to parse domain XML", e);
+    }
+  }
+
+  /**
+   * The domain's persistent-config XML with its memory size replaced.
+   *
+   * <p>Both {@code <memory>} (the boot-time maximum) and {@code <currentMemory>} (the balloon
+   * target) are set, mirroring the pair of {@code setVcpusFlags} calls in {@code updateCpu}.
+   * Leaving {@code currentMemory} behind would boot the domain with the old balloon size.
+   */
+  public static String withMemory(String domainXml, long ramMiB) {
+    try {
+      Document doc = parse(domainXml);
+      setMemory(doc, "memory", ramMiB);
+      // libvirt always emits currentMemory, but a hand-edited domain may not carry it.
+      if (doc.getElementsByTagName("currentMemory").getLength() > 0) {
+        setMemory(doc, "currentMemory", ramMiB);
+      }
+      return serialize(doc, "domain memory patch");
+    } catch (ParserConfigurationException | SAXException | IOException e) {
+      throw new XmlParseException("Failed to parse domain XML", e);
+    }
+  }
+
+  /**
+   * Writes {@code ramMiB} into {@code tag} as KiB, rewriting the {@code unit} attribute so the
+   * value and its unit can never drift apart.
+   */
+  public static void setMemory(Document doc, String tag, long ramMiB) {
+    Element element = (Element) doc.getElementsByTagName(tag).item(0);
+    if (element == null) {
+      throw new XmlParseException("Element not found: <" + tag + ">");
+    }
+    element.setAttribute("unit", "KiB");
+    element.setTextContent(String.valueOf(ramMiB * KIB_PER_MIB));
+  }
+
+  /** Serializes a DOM tree; {@code what} only names the subject in the failure message. */
+  public static String serialize(Document doc, String what) {
+    try {
+      Transformer transformer = TransformerFactory.newInstance().newTransformer();
+      transformer.setOutputProperty(OutputKeys.INDENT, "yes");
+      StringWriter writer = new StringWriter();
+      transformer.transform(new DOMSource(doc), new StreamResult(writer));
+      return writer.toString();
+    } catch (TransformerException e) {
+      throw new XmlParseException("Failed to serialize XML for '" + what + "'", e);
     }
   }
 

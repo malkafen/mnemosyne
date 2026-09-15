@@ -23,8 +23,7 @@ public final class Plan {
     public String diff() {
       StringBuilder sb = new StringBuilder();
       if (cpuChanged()) sb.append(String.format(" cpu %d->%d", actual.cpu(), server.getCpu()));
-      // RAM excluded from the plan output until libvirt-java ships setMemoryFlags:
-      // if (ramChanged()) sb.append(String.format(" ram %d->%d", actual.ram(), server.getRam()));
+      if (ramChanged()) sb.append(String.format(" ram %d->%d", actual.ram(), server.getRam()));
       return sb.toString().trim();
     }
   }
@@ -35,7 +34,7 @@ public final class Plan {
    */
   private final Map<String, Server> toAdopt;
 
-  /** Managed domains whose live CPU differs from config, keyed by server id. */
+  /** Managed domains whose live vCPU count or RAM differs from config, keyed by server id. */
   private final Map<String, Update> toUpdate;
 
   /**
@@ -71,7 +70,7 @@ public final class Plan {
         managedD.values().stream()
             .filter(d -> servers.containsKey(d.serverId()))
             .map(d -> new Update(servers.get(d.serverId()), d))
-            .filter(u -> u.cpuChanged() /* || u.ramChanged() */)
+            .filter(u -> u.cpuChanged() || u.ramChanged())
             .collect(
                 Collectors.toMap(u -> u.actual().serverId(), u -> u, (a, b) -> a, TreeMap::new));
 
