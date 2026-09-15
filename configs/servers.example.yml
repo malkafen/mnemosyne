@@ -22,51 +22,56 @@
   host: "192.0.2.10"                 # hypervisor address for the SSH/libvirt link
   user: "virtops"                    # SSH user on the hypervisor
   port: 22                           # SSH port (1-65535)
-  key: "~/.ssh/id_ed25519"           # PRIVATE SSH key on the machine running Mnemosyne
+  key: "/home/virtops/.ssh/id_ed25519"  # PRIVATE SSH key, absolute path ("~" is NOT expanded)
+
+  # Group defaults: `volLookup`, `metaUrl` and the `templates` block are declared
+  # once here and inherited by every server below, which may still override them.
+  volLookup: "debian-13-genericcloud-amd64.qcow2"   # base image in `pool` to clone new disks from
+  # Base URL where the VMs reach Mnemosyne's cloud-init server. Must be reachable
+  # from INSIDE the guest — the Mnemosyne host IP, port 8080, path /cloud-init/.
+  metaUrl: "http://192.0.2.5:8080/cloud-init/"
+
   servers:
 
     # --- VM #1: a small web node ---
     # `name` omitted → libvirt domain name / hostname defaults to the key below.
     web-01.example.lan:              # server id (stable) AND, here, the domain name
-      cpu: "2"                       # vCPU count (positive integer, as a string)
-      ram: "2048"                    # RAM in MiB
+      cpu: 2                         # vCPU count (1-128)
+      ram: 2048                      # RAM in MiB (256-1048576)
       ip: "192.0.2.40/24"            # primary address in CIDR notation
       gateway: "192.0.2.1"           # default gateway (plain IPv4)
       disk: 30                       # disk size in GiB (minimum 10); base image is resized to this
       pool: "default"                # libvirt storage pool holding the base image and new disk
-      volLookup: "debian-13-genericcloud-amd64.qcow2"  # base image in `pool` to clone the disk from
       network: "host-bridge"         # libvirt network / bridge to attach the VM to
       launch: true                   # start the VM after it is defined
-      # Base URL where THIS VM reaches Mnemosyne's cloud-init server.
-      # Must be reachable from inside the guest — use the Mnemosyne host IP, port 8080, path /cloud-init/.
-      metaUrl: "http://192.0.2.5:8080/cloud-init/"
+      # volLookup / metaUrl / templates are inherited from the group above.
 
     # --- VM #2: a cache node (relies on field defaults where possible) ---
     # `name` set explicitly → the key stays the stable id, the domain can be
     # renamed later by editing `name` without recreating the VM.
     cache-01:                        # server id (stable)
       name: "cache-01.example.lan"   # libvirt domain name / hostname
-      cpu: "4"
-      ram: "4096"
+      cpu: 4
+      ram: 4096
       ip: "192.0.2.41/24"
       gateway: "192.0.2.1"
       disk: 40
       pool: "default"
-      volLookup: "debian-13-genericcloud-amd64.qcow2"
       network: "host-bridge"
-      metaUrl: "http://192.0.2.5:8080/cloud-init/"
+      # Per-server overrides of the group defaults:
+      volLookup: "noble-server-cloudimg-amd64.img"
 
 # ----- Group 2: a second hypervisor ------------------------------------------
 - group: "hv02.example.lan"
   host: "192.0.2.20"
   user: "virtops"
   port: 22
-  key: "~/.ssh/id_ed25519"
+  key: "/home/virtops/.ssh/id_ed25519"
   servers:
 
     db-01.example.lan:
-      cpu: "8"
-      ram: "16384"
+      cpu: 8
+      ram: 16384
       ip: "198.51.100.50/24"
       gateway: "198.51.100.1"
       disk: 120
@@ -74,8 +79,11 @@
       volLookup: "debian-13-genericcloud-amd64.qcow2"
       network: "host-bridge"
       metaUrl: "http://192.0.2.5:8080/cloud-init/"
-      # Override the default templates only if you keep them somewhere custom:
-      # serverTmpl: "/app/templates/server.xml"          # use server_arm.xml on aarch64 hosts
-      # volTmpl: "/app/templates/volume.xml"
-      # userDataTmpl: "/app/templates/user-data.yml"
-      # networkConfigTmpl: "/app/templates/network-config.yml"
+      # Override the default templates only if you keep them somewhere custom.
+      # These are the defaults; a `templates:` block is also valid at group level.
+      # templates:
+      #   serverTmpl: "/app/templates/server.xml"        # use server_arm.xml on aarch64 hosts
+      #   volTmpl: "/app/templates/volume.xml"
+      #   metaDataTmpl: "/app/templates/meta-data.yml"
+      #   userDataTmpl: "/app/templates/user-data.yml"
+      #   networkConfigTmpl: "/app/templates/network-config.yml"

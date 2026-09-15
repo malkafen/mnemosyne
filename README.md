@@ -1,307 +1,171 @@
-<!-- Language switcher -->
-**English** | [Русский](README.ru.md)
-
 # Mnemosyne
 
-> Declarative, Terraform-style provisioning of libvirt/KVM virtual machines, driven by a single YAML inventory and cloud-init.
+Declarative provisioning of libvirt/KVM virtual machines. One YAML inventory describes the
+virtual machines that should exist on a set of hypervisors; each run reads the domains that
+actually exist, prints the difference, and applies it.
 
-Mnemosyne reads one YAML file — the **desired state**: which virtual machines should exist on
-which hypervisors. It then reads the **current state** (the domains that actually exist on each
-host) and applies the difference:
+Mnemosyne connects to every hypervisor over `qemu+ssh`, clones new disks from a base cloud image
+inside a libvirt storage pool, and configures the guests with cloud-init through the NoCloud
+datasource served by a built-in HTTP server.
 
-- VMs in the desired state but missing from the current state are **created** (disk cloned from a
-  base cloud image, then booted and configured by cloud-init);
-- VMs in the current state but no longer in the desired state are **destroyed** (domain undefined
-  and its disk volumes deleted).
-
-It talks to each hypervisor over `qemu+ssh` (libvirt), and serves cloud-init data to the freshly
-booted VMs from a small built-in HTTP server.
-
----
-
-## Table of contents
-
-- [How it works](#how-it-works)
-- [Concepts & terminology](#concepts--terminology)
-- [Requirements](#requirements)
-- [Build](#build)
-- [Run](#run)
-- [Configuration](#configuration)
-- [cloud-init templates](#cloud-init-templates)
-- [Example output](#example-output)
-- [Project layout](#project-layout)
-
----
-
-## How it works
-
-```
-                         ┌──────────────────────────────────────────────────┐
-   configs/servers.yml ─▶│  1 · load + validate          desired state      │
-                         └────────────────────────┬─────────────────────────┘
-                                                  │  qemu+ssh
-                                                  ▼
-                         ┌──────────────────────────────────────────────────┐
-                         │  2 · read existing domains    current state       │
-                         │      identity = libvirt metadata (serverId),      │
-                         │      not the VM name                              │
-                         └────────────────────────┬─────────────────────────┘
-                                                  ▼
-                         ┌──────────────────────────────────────────────────┐
-                         │  3 · plan  =  desired △ current                   │
-                         │      + create     ~ update     - delete           │
-                         └────────────────────────┬─────────────────────────┘
-                          --plan stops here ◀─────┤
-                                                  │  else: 10s confirm window
-                                                  ▼
-                         ┌──────────────────────────────────────────────────┐
-                         │  4 · apply (per host)                             │
-                         │      delete ▸ update ▸ clone disk ▸ define & boot │
-                         └────────────────────────┬─────────────────────────┘
-                                                  ▼   SMBIOS serial
-                                       ds=nocloud;s=<metaUrl><name>/
-                                                  │
-                                                  ▼
-                         ┌──────────────────────────────────────────────────┐
-                         │  CloudInitServer   HTTP :8080/cloud-init/         │
-                         │  serves  user-data · meta-data · network-config   │
-                         └──────────────────────────────────────────────────┘
-```
-
-The run is a single pass (mirrors `Mnemosyne.run`):
-
-1. **Load & validate the desired state** — parse the inventory into a `List<Mnemon>`, each holding a
-   **map of VMs keyed by a stable id**, and validate every field with Jakarta Bean Validation. Any
-   invalid field aborts the run with a precise message.
-2. **Start the cloud-init server** — a built-in HTTP server starts on port **8080** under the
-   `/cloud-init` path.
-3. **Connect & plan** — for each hypervisor group, open a libvirt connection over
-   `qemu+ssh://user@host:port/system?keyfile=…`, read the domains that already exist, and diff the
-   **desired state** against this **current state**. Identity is the `serverId` written into each
-   domain's libvirt metadata — *not* its name — so a VM can be renamed without being recreated. Every
-   domain lands in one of four buckets: `+ create`, `~ update`, `- delete`, or **unmanaged** (a
-   pre-existing domain that carries no Mnemosyne metadata). With `--plan` the run stops after printing.
-4. **Confirmation window** — a 10-second pause (`Ctrl+C` to abort) before any change is applied.
-5. **Apply (per host)** — in order: **delete → update → create**:
-   - **Delete** — domains managed by Mnemosyne but no longer in the inventory are destroyed,
-     undefined, and their file-backed disks deleted.
-   - **Update** — for managed VMs whose spec drifted, reconcile in place (currently vCPU count; RAM
-     updates are pending a libvirt-java release).
-   - **Create storage** — for each new VM, clone its disk from the base cloud image (`volLookup`)
-     inside the target pool and resize it to the requested capacity. Failures roll back the partially
-     created volume.
-   - **Define & start** — build the domain XML (name, RAM, vCPU, disk, network, the Mnemosyne
-     metadata and the cloud-init NoCloud serial), register the VM's `user-data` / `network-config`
-     with the HTTP server, define the domain and boot it.
-6. **Wait for cloud-init** — poll until every new VM has pulled its config (or a ~100 s timeout:
-   20 attempts × 5 s).
-7. **Shut down** — free domain handles, close libvirt connections, stop the HTTP server.
-
-cloud-init wiring uses the **NoCloud** datasource: each VM is given the SMBIOS serial
-`ds=nocloud;s=<metaUrl><name>/`, which tells cloud-init inside the guest where to fetch its
-`meta-data`, `user-data` and `network-config`. Those requests land on Mnemosyne's HTTP server,
-which answers from the per-VM data registered during apply.
-
-### Adopting existing VMs (`--join`)
-
-`--join` brings **already-running domains** under Mnemosyne's management without recreating them. In
-this mode the plan lists only the *unmanaged* domains, and for each one whose name matches a server in
-the inventory, Mnemosyne writes the `mnemosyne` metadata (`managedBy`, `serverId`) onto the live
-domain. Nothing is created or deleted — the next normal run simply sees those VMs as managed.
-
----
-
-## Concepts & terminology
+## State model
 
 | Term | Meaning |
 | --- | --- |
-| **Mnemon** | One **hypervisor group**: a libvirt host plus the **map of VMs** (keyed by id) that should live on it. Top-level item in the inventory. |
-| **Server** | One **virtual machine** (a libvirt *domain*) belonging to a Mnemon. |
-| **serverId** | The **map key** of a server — a stable identity stored in the domain's libvirt metadata. Managed VMs are matched by this id, so you can change a VM's `name` without recreating it. |
-| **managed / unmanaged** | A domain is **managed** when it carries Mnemosyne metadata (`managedBy: mnemosyne`); a pre-existing domain Mnemosyne didn't create is **unmanaged** (and can be adopted with `--join`). |
-| **Plan** | The `+ create` / `~ update` / `- delete` diff between the desired state (inventory) and the current state (existing domains), plus the list of unmanaged domains. |
-| **Templates** | The set of XML/YAML template paths (`serverTmpl`, `volTmpl`, `userDataTmpl`, `networkConfigTmpl`). Set once at the group level and inherited by every VM, or overridden per server. |
-| **CloudInitServer** | Built-in HTTP server (`:8080/cloud-init/<vm>/<file>`) that feeds cloud-init data to booting VMs. |
-| **volLookup** | Name of the base cloud image inside the pool that new disks are cloned from. |
+| Mnemon | One hypervisor group: a libvirt host plus the map of virtual machines that belong on it. Top-level item of the inventory. |
+| Server | One virtual machine, that is, one libvirt domain. |
+| `serverId` | The inventory map key. It is written into the domain's libvirt metadata and is the only identity Mnemosyne matches on, so a VM can be renamed without being recreated. |
+| managed / unmanaged | A domain is managed when it carries `managedBy: mnemosyne` metadata. Pre-existing domains are unmanaged and are never touched unless adopted with `--join`. |
+| Plan | The diff between the inventory (desired state) and the domains found on the host (current state), reported as `create`, `update`, `delete` plus the list of unmanaged domains. |
 
----
+## How a run works
+
+1. The inventory is parsed and validated with Jakarta Bean Validation. Any invalid field aborts the
+   run with the offending path and message; nothing is contacted before this passes.
+2. A libvirt connection is opened per group over
+   `qemu+ssh://user@host:port/system?keyfile=<key>&no_verify=1`. The key must be an existing file on
+   the machine running Mnemosyne.
+3. Every domain on the host is read back into a state snapshot (name, vCPU, RAM, `serverId`,
+   `managedBy`, disk paths) and diffed against the inventory:
+   - **create** — inventory entries with no managed domain and no name collision with an unmanaged one;
+   - **update** — managed domains whose vCPU count or RAM differs from the inventory;
+   - **delete** — managed domains no longer listed in the inventory (suppressed by `--no-delete`);
+   - **unmanaged** — everything else, reported but untouched.
+   With `--plan` the run stops here.
+4. The cloud-init server starts on port 8080 under `/cloud-init`, followed by a 10-second
+   confirmation window (`Ctrl+C` aborts).
+5. Each group is reconciled in the order delete, update, create:
+   - **delete** destroys and undefines the domain, then deletes its file-backed volumes;
+   - **update** changes vCPU count via libvirt and RAM by redefining the persistent config. Both take
+     effect on the next boot of the guest; the running domain is left alone;
+   - **create** clones the base image (`volLookup`) inside the target pool, resizes it to the
+     requested capacity, registers the cloud-init seed, then defines and boots the domain. A volume
+     that already carries the VM's name is reused; a failed resize is rolled back.
+   Failures are per-VM: the entry is reported as skipped and the run continues.
+6. Mnemosyne waits for every new guest to report back over cloud-init's `phone_home`, polling every
+   5 seconds up to 5 minutes, then closes the connections and stops the HTTP server.
+
+Guests find their configuration through the SMBIOS serial `ds=nocloud;s=<metaUrl><name>/`, which
+points cloud-init at `meta-data`, `user-data`, `network-config` and `vendor-data` on Mnemosyne's
+HTTP server. `metaUrl` must therefore resolve from inside the guest.
+
+### Adopting existing VMs
+
+`--join` takes over already-running domains without recreating them. The plan lists the unmanaged
+domains, and for each one whose name matches an inventory entry Mnemosyne writes the `mnemosyne`
+metadata onto the live domain. Nothing is created, changed or deleted; subsequent ordinary runs
+simply see those VMs as managed.
 
 ## Requirements
 
-On the machine that **runs** Mnemosyne:
+On the machine running Mnemosyne: Java 17+, Maven to build, the libvirt client libraries
+(`libvirt0`, `libvirt-clients`, `libvirt-dev`) for JNA, an OpenSSH client, and an SSH key accepted
+by each hypervisor.
 
-- **Java 17+**
-- **Maven** (to build)
-- **libvirt client libraries + JNA**: `libvirt0`, `libvirt-clients`, `libvirt-dev`
-- **OpenSSH client** (for the `qemu+ssh` transport)
-- An SSH key that can reach each hypervisor as the configured `user`
-
-On each **hypervisor host**:
-
-- libvirt + KVM/QEMU, reachable over SSH
-- A storage pool containing the **base cloud image** referenced by `volLookup`
-  (e.g. `debian-13-genericcloud-amd64-*.qcow2` or `noble-server-cloudimg-amd64.img`)
-- A libvirt **network** (or bridge) matching the `network` field
-- The Mnemosyne HTTP server (port 8080) must be reachable **from the VMs** at the address you put
-  in `metaUrl`
-
----
+On each hypervisor: libvirt with KVM/QEMU reachable over SSH, a storage pool holding the base cloud
+image named by `volLookup`, a libvirt network or bridge matching `network`, and network reachability
+from the guests back to Mnemosyne's port 8080.
 
 ## Build
 
 ```bash
-mvn clean package
+mvn clean package          # shaded jar at target/mnemosyne-<version>.jar
+mvn spotless:apply         # google-java-format; CI runs spotless:check and rejects unformatted code
 ```
 
-This produces a shaded uber-jar at `target/mnemosyne-<version>.jar`.
-
-Format the code before pushing (CI rejects unformatted code):
+## Usage
 
 ```bash
-mvn spotless:apply   # rewrite files with google-java-format
-mvn spotless:check   # verify only -- this is what CI runs
-```
+# Preview only — no domain is touched.
+java -jar target/mnemosyne-*.jar -f ./configs/servers.yml --plan
 
----
-
-## Run
-
-```bash
-# Preview changes only (no VM is touched):
-java -jar target/mnemosyne-*.jar --servers-file ./configs/servers.yml --plan
-
-# Apply (10s confirmation window before changes):
+# Apply, after the 10-second confirmation window.
 java -Djna.library.path=/usr/lib/x86_64-linux-gnu \
-     -jar target/mnemosyne-*.jar --servers-file ./configs/servers.yml
+     -jar target/mnemosyne-*.jar -f ./configs/servers.yml
 ```
 
-> `-Djna.library.path` points JNA at the native libvirt library. Typical values:
-> `/usr/lib/x86_64-linux-gnu` (Debian/Ubuntu), `/usr/lib64` (RHEL/Fedora),
-> `/opt/homebrew/lib` (macOS / Homebrew).
-
-### CLI flags
+`-Djna.library.path` points JNA at the native libvirt library: `/usr/lib/x86_64-linux-gnu` on
+Debian/Ubuntu, `/usr/lib64` on RHEL/Fedora, `/opt/homebrew/lib` on macOS.
 
 | Flag | Description | Default |
 | --- | --- | --- |
-| `--servers-file <path>` | Path to the inventory YAML | `/etc/mnemosyne/servers.yml` |
-| `--plan` | Plan only — print the diff and exit without changing anything | off |
-| `--join` | Adopt mode — write Mnemosyne metadata onto matching *unmanaged* domains so they become managed. Creates and deletes nothing. | off |
+| `-f`, `--servers-file <path>` | Path to the inventory YAML | `/etc/mnemosyne/servers.yml` |
+| `-p`, `--plan` | Print the plan and exit without applying | off |
+| `-j`, `--join` | Adopt matching unmanaged domains; create and delete nothing | off |
+| `--no-delete` | Keep managed domains that are absent from the inventory | off |
+| `-v`, `--verbose` | Debug logging, including full stack traces | off |
+| `-h`, `--help`, `-V`, `--version` | Usage and version | — |
 
 ### Docker
 
-A multi-stage [`Dockerfile`](Dockerfile) builds the jar and a runtime image with the libvirt
-client libraries and the `templates/` baked in:
+The multi-stage [`Dockerfile`](Dockerfile) builds the jar and produces a runtime image with the
+libvirt client libraries and `templates/` baked in at `/app/templates`.
 
 ```bash
 docker build -t mnemosyne .
-docker run --rm \
+docker run --rm --network host \
   -v "$PWD/configs:/app/configs" \
   -v "$HOME/.ssh:/root/.ssh:ro" \
-  mnemosyne --servers-file /app/configs/servers.yml
+  mnemosyne -f /app/configs/servers.yml
 ```
-
----
 
 ## Configuration
 
-The inventory is a YAML **list of Mnemons** (hypervisor groups). Inside a group, `servers` is a
-**map** whose key is the server **id** (a stable identity); the VM's `name` defaults to that key. A
-fully commented starter file is provided at
-[`configs/servers.example.yml`](configs/servers.example.yml) — copy it and edit:
+The inventory is a list of groups; `servers` is a map keyed by server id. `volLookup`, `metaUrl` and
+the `templates` block may be declared once per group and are inherited by every server, which can
+still override them individually.
+
+```yaml
+- group: "hv01.example.lan"
+  host: "192.0.2.10"
+  user: "virtops"
+  port: 22
+  key: "/home/virtops/.ssh/id_ed25519"    # absolute path; ~ is not expanded
+  volLookup: "debian-13-genericcloud-amd64.qcow2"
+  metaUrl: "http://192.0.2.5:8080/cloud-init/"
+  servers:
+    web-01.example.lan:                   # server id; also the domain name unless `name` is set
+      cpu: 2                              # 1-128
+      ram: 2048                           # MiB, 256-1048576
+      ip: "192.0.2.40/24"                 # CIDR
+      gateway: "192.0.2.1"
+      disk: 30                            # GiB, minimum 10
+      pool: "default"
+      network: "host-bridge"
+```
+
+[`configs/servers.example.yml`](configs/servers.example.yml) documents every field, its default and
+its constraints; copy it and edit:
 
 ```bash
 cp configs/servers.example.yml configs/servers.yml
 ```
 
-### Mnemon (hypervisor group) fields
+Local inventories (`configs/servers.yml`, `configs/servers_prod.yml`) are git-ignored.
 
-| Field | Required | Description |
-| --- | --- | --- |
-| `group` | yes | Human-readable label for the group (used in logs/plan output). |
-| `host` | yes | Hypervisor address for the SSH/libvirt connection. |
-| `user` | yes | SSH user on the hypervisor. |
-| `port` | yes | SSH port (1–65535). |
-| `key` | — | Path to the **private** SSH key on the machine running Mnemosyne. |
-| `servers` | yes (≥1) | **Map** of VMs (`<id>: { …fields… }`) that should exist in this group. |
+### Templates
 
-The next three settings are **group defaults**: declare them once on the Mnemon and every server
-inherits them. Any server may override its own value.
+Five templates are rendered per VM, configured through the `templates` block and defaulting to
+`/app/templates/`: `serverTmpl` (domain XML), `volTmpl` (volume XML), `metaDataTmpl`, `userDataTmpl`
+and `networkConfigTmpl`. Mnemosyne fills in only the values it owns — domain name, vCPU, RAM, disk
+source, network, metadata and NoCloud serial in the XML; `instance-id` and `local-hostname` in
+`meta-data`; `hostname`, `fqdn` and `phone_home` in `user-data`; `addresses` and `gateway4` of the
+`vif0` interface in `network-config`. Everything else is used as written.
 
-| Field | Default | Description |
-| --- | --- | --- |
-| `volLookup` | `noble-server-cloudimg-amd64.img` | Base image inside the pool to clone new disks from. |
-| `metaUrl` | `http://127.0.0.1:80/files/` | Base URL where VMs reach the cloud-init server. Set it to `http://<mnemosyne-host>:8080/cloud-init/`. |
-| `templates` | see [below](#cloud-init-templates) | Block of template paths (`serverTmpl`, `volTmpl`, `userDataTmpl`, `networkConfigTmpl`). |
+The shipped `templates/user-data.yml` and `templates/network-config.yml` are working defaults with
+placeholder credentials — add your own SSH public keys to `user-data.yml` before the first run. The
+matching `*.example.yml` files carry the annotated reference.
 
-### Server (VM) fields
+## Output
 
-Each entry under `servers` is keyed by its **id**. The id is stored in the domain's libvirt metadata
-and is how Mnemosyne recognizes the VM on later runs — keep it stable, and rename the VM freely via
-`name`.
-
-| Field | Required | Default | Description |
-| --- | --- | --- | --- |
-| *(map key)* | yes | — | The server **id** — stable identity stored in libvirt metadata. |
-| `name` | — | *(the id)* | VM name. Used as libvirt domain name, disk volume name **and** hostname. Defaults to the map key. |
-| `cpu` | yes | `2` | vCPU count (positive integer, as a string). |
-| `ram` | yes | `1024` | RAM in **MiB** (positive integer, as a string). |
-| `ip` | yes | — | Address in **CIDR** notation, e.g. `192.168.70.70/24`. |
-| `gateway` | — | — | Default gateway (plain IPv4). |
-| `disk` | — | `30` | Disk size in **GiB** (min 10). The cloned image is resized to this. |
-| `pool` | yes | `default` | libvirt storage pool that holds the base image and the new disk. |
-| `network` | yes | `default` | libvirt network / bridge name to attach the VM to. |
-| `launch` | — | `true` | Whether the VM should be started. |
-| `volLookup` | inherited | *(group value)* | Override the group's base image for this VM only. |
-| `metaUrl` | inherited | *(group value)* | Override the group's cloud-init base URL for this VM only. |
-| `templates` | inherited | *(group value)* | Override individual template paths for this VM only (merged over the group block). |
-
-> **Important:** `metaUrl` must be reachable **from inside the VM**. `127.0.0.1` only works if the
-> guest and Mnemosyne share the network namespace; normally you want the hypervisor-reachable IP of
-> the host running Mnemosyne plus port `8080` and path `/cloud-init/`.
-
----
-
-## cloud-init templates
-
-When a VM is created, Mnemosyne renders two cloud-init documents from templates and serves them
-over HTTP:
-
-- **user-data** — packages, users, SSH keys, sysctl, etc. `hostname`/`fqdn` are filled from the
-  server `name`. See [`templates/user-data.example.yml`](templates/user-data.example.yml).
-- **network-config** — the `vif0` interface gets its `addresses` and `gateway4` filled from the
-  server's `ip`/`gateway`. See [`templates/network-config.example.yml`](templates/network-config.example.yml).
-
-The `.example.yml` files are committed as reference. Copy them to the working names and add your
-own SSH public keys:
-
-```bash
-cp templates/user-data.example.yml      templates/user-data.yml
-cp templates/network-config.example.yml templates/network-config.yml
-# then edit templates/user-data.yml — replace the placeholder ssh_authorized_keys with your keys
-```
-
-Template paths are configured through the `templates` block — set once per group and inherited by
-every VM, or overridden per server. Each path defaults to `/app/templates/<file>` (the location they
-are baked into in the Docker image):
-
-```yaml
-templates:
-  serverTmpl:        /app/templates/server.xml             # domain XML
-  volTmpl:           /app/templates/volume.xml             # volume XML
-  userDataTmpl:      /app/templates/user-data.yml          # cloud-init user-data
-  networkConfigTmpl: /app/templates/network-config.yml     # cloud-init network-config
-```
-
----
-
-## Example output
+Plan and applied blocks share one format, so they line up entry by entry. Anything that fails is
+listed with a `·` marker and does not stop the run.
 
 ```
-10:42:07 Connection to 'hv01.example.lan' was successful.
-
---- Plan ---------------------------------------------------
+--- Plan ---------------------------------------------
 [ hv01.example.lan ]  delete: 1, update: 1, create: 1
   - old-test.example.lan
+      /var/lib/libvirt/images/old-test.example.lan
   ~ cache-01  (cpu 2->4)
   + web-01
 
@@ -309,63 +173,47 @@ templates:
 
 Applying in 10s — Ctrl+C to abort...
 
---- Applied ------------------------------------------------
-[ hv01.example.lan ]  delete: 1, update: 1, create: 1
+--- Applied -------------------------------------------
+[ hv01.example.lan ]  delete: 1, update: 1, create: 1, skipped: 0
   - old-test.example.lan
   ~ cache-01  (cpu 2->4, applies after restart)
   + web-01
-
-10:42:21 All 1 mnemones provisioned. Waiting cloud-init is done...
-10:43:35 All cloud-init tasks completed (1/1). Preparing for shutdown...
 ```
 
-`Plan` and `Applied` share one format, so the two blocks line up entry by entry. Anything that
-failed keeps the run going and is listed under `skipped`:
+With `--join` the plan lists the unmanaged domains instead, marking the ones that can be adopted:
 
 ```
---- Applied ------------------------------------------------
-[ hv01.example.lan ]  delete: 1, create: 1, skipped: 1
-  - old-test.example.lan
-  + web-01
-  · cache-01  (update failed (see log))
-```
-
-With `--join`, the plan instead lists the unmanaged domains that can be adopted:
-
-```
---- Plan ---------------------------------------------------
+--- Plan ---------------------------------------------
 [ hv01.example.lan ]  adopt: 1, unmanaged: 1
   + legacy-web.example.lan  (as 'web-01')
   > legacy-db.example.lan
 
---- Applied ------------------------------------------------
+--- Applied -------------------------------------------
 [ hv01.example.lan ]  join: 1
   + web-01
 ```
-
----
 
 ## Project layout
 
 ```
 src/main/java/com/mnemosyne/app/
-  Mnemosyne.java                 # entry point & orchestration (the run loop above)
-  config/Config.java             # CLI argument parsing (--servers-file, --plan, --join)
-  model/Mnemon.java              # hypervisor group: connect, plan, apply (delete/update/create), join
-  model/Server.java              # one VM: XML/YAML template rendering, validation
-  model/Templates.java           # template paths: group defaults + per-server overrides
-  model/Plan.java                # create / update / delete / unmanaged diff
-  output/Report.java             # shared plan/apply block printed to the console
-  model/Status.java              # per-server lifecycle status
-  model/DomainState.java         # snapshot of a live domain (id, cpu, ram, managedBy)
-  model/DomainInspector.java     # read metadata & disk paths back from existing domain XML
-  utils/Sha256Util.java          # spec-hash helper for drift detection
-  http/CloudInitServer.java      # built-in HTTP server for cloud-init data
-templates/                       # domain/volume XML + cloud-init YAML templates
-configs/                         # inventory + logback config
+  Mnemosyne.java              entry point: load, validate, plan, confirm, apply, wait
+  config/Config.java          picocli command-line options
+  model/Mnemon.java           hypervisor group; inventory loading and inheritance
+  model/Server.java           one VM; XML and cloud-init rendering, validation constraints
+  model/Templates.java        template paths, group defaults merged with per-server overrides
+  model/Plan.java             create/update/delete/adopt/unmanaged diff
+  model/DomainState.java      snapshot of a live domain
+  libvirt/Hypervisor.java     qemu+ssh connection
+  libvirt/Harmonia.java       per-group orchestration: plan, reconcile, join
+  libvirt/DomainOps.java      define, boot, destroy, undefine, update, read metadata
+  libvirt/StorageOps.java     clone, resize and delete volumes
+  http/CloudInitServer.java   NoCloud seed server and phone_home tracking
+  output/Report.java          plan/applied console blocks
+  utils/XmlUtil.java          domain XML parsing and memory rewriting
+configs/                      inventory example
+templates/                    domain and volume XML, cloud-init YAML
 ```
-
----
 
 ## License
 
