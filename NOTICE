@@ -41,7 +41,7 @@ Logback (ch.qos.logback:logback-classic, logback-core)
   Project: https://logback.qos.ch/
 
 --------------------------------------------------------------------------------
-Jakarta Expression Language impl (org.glassfish:jakarta.el)
+Jakarta Expression Language (jakarta.el:jakarta.el-api, org.glassfish:jakarta.el)
 --------------------------------------------------------------------------------
   License: Eclipse Public License 2.0 OR GPL-2.0 with Classpath Exception
   Project: https://eclipse-ee4j.github.io/el-ri/
@@ -54,12 +54,6 @@ SLF4J API (org.slf4j:slf4j-api)
   Project: https://www.slf4j.org/
 
 --------------------------------------------------------------------------------
-EdDSA-Java (net.i2p.crypto:eddsa)
---------------------------------------------------------------------------------
-  License: CC0 1.0 Universal (Public Domain Dedication)
-  Project: https://github.com/str4d/ed25519-java
-
---------------------------------------------------------------------------------
 Components under the Apache License 2.0
 --------------------------------------------------------------------------------
   The following bundled libraries are licensed under the Apache License,
@@ -70,8 +64,9 @@ Components under the Apache License 2.0
                           com.fasterxml.jackson.dataformat:jackson-dataformat-yaml)
                           Copyright FasterXML, LLC
     - SnakeYAML         (org.yaml:snakeyaml)
-    - Apache MINA SSHD  (org.apache.sshd:sshd-sftp, sshd-core, sshd-common)
-                          Copyright The Apache Software Foundation
+    - picocli           (info.picocli:picocli)
+    - Classmate         (com.fasterxml:classmate)
+    - JBoss Logging     (org.jboss.logging:jboss-logging)
     - Jakarta Bean Validation API
                         (jakarta.validation:jakarta.validation-api)
     - Hibernate Validator
