@@ -1,0 +1,37 @@
+<!--
+  Minimal stand-in for templates/server.xml, deliberately left on the OLD unit='MiB'.
+  Server.buildServerXml must rewrite both the unit and the value, so a stale custom
+  template cannot silently define a domain with 1024x the requested memory.
+-->
+<domain type='kvm'>
+  <name></name>
+
+  <metadata>
+    <mnem:mnemosyne xmlns:mnem='https://mnemosyne.dev/schema/v1'>
+      <mnem:managedBy>mnemosyne</mnem:managedBy>
+      <mnem:serverId></mnem:serverId>
+      <mnem:specVersion>1</mnem:specVersion>
+    </mnem:mnemosyne>
+  </metadata>
+
+  <memory unit='MiB'></memory>
+  <vcpu></vcpu>
+
+  <sysinfo type='smbios'>
+    <system>
+      <entry name='serial'></entry>
+    </system>
+  </sysinfo>
+
+  <devices>
+    <disk type='file' device='disk'>
+      <driver name='qemu' type='qcow2'/>
+      <source file=''/>
+      <target dev='vda' bus='virtio'/>
+    </disk>
+    <interface type='network'>
+      <source network=''/>
+      <model type='virtio'/>
+    </interface>
+  </devices>
+</domain>
