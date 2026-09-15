@@ -8,16 +8,12 @@ import com.mnemosyne.app.utils.*;
 import jakarta.validation.constraints.*;
 import java.io.File;
 import java.io.IOException;
-import java.io.StringWriter;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import javax.xml.parsers.DocumentBuilder;
 import javax.xml.parsers.DocumentBuilderFactory;
 import javax.xml.parsers.ParserConfigurationException;
-import javax.xml.transform.*;
-import javax.xml.transform.dom.DOMSource;
-import javax.xml.transform.stream.StreamResult;
 import lombok.Getter;
 import lombok.Setter;
 import org.w3c.dom.Document;
@@ -118,7 +114,7 @@ public class Server {
   public String buildServerXml() {
     Document doc = loadXmlTemplate(this.templates.getServerTmpl());
     setElementText(doc, "name", getName());
-    setElementText(doc, "memory", String.valueOf(this.ram));
+    XmlUtil.setMemory(doc, "memory", this.ram);
     setElementText(doc, "vcpu", String.valueOf(this.cpu));
     setElementTextNS(doc, "https://mnemosyne.dev/schema/v1", "serverId", getId());
     setCloudInitSerial(doc);
@@ -159,15 +155,7 @@ public class Server {
   }
 
   private String documentToString(Document doc) {
-    try {
-      Transformer transformer = TransformerFactory.newInstance().newTransformer();
-      transformer.setOutputProperty(OutputKeys.INDENT, "yes");
-      StringWriter writer = new StringWriter();
-      transformer.transform(new DOMSource(doc), new StreamResult(writer));
-      return writer.toString();
-    } catch (TransformerException e) {
-      throw new XmlParseException("Failed to serialize XML for '" + getName() + "'", e);
-    }
+    return XmlUtil.serialize(doc, getName());
   }
 
   private void setElementText(Document doc, String tag, String value) {

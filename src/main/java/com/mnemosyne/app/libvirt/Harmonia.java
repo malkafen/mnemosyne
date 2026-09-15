@@ -101,9 +101,9 @@ public class Harmonia implements AutoCloseable {
   private void update(Report report) {
     for (Plan.Update u : plan.getToUpdate().values()) {
       try {
-        if (u.cpuChanged())
-          if (domainOps.updateCpu(u.actual().name(), u.server().getCpu()))
-            report.add("update", "~", u.server().getId(), u.diff() + ", applies after restart");
+        if (u.cpuChanged()) domainOps.updateCpu(u.actual().name(), u.server().getCpu());
+        if (u.ramChanged()) domainOps.updateRam(u.actual().name(), u.server().getRam());
+        report.add("update", "~", u.server().getId(), u.diff() + ", applies after restart");
       } catch (LibvirtException e) {
         log.debug("[ {} ] update failed for '{}'", group, u.server().getId(), e);
         report.skip(u.server().getId(), "update failed: " + cause(e));

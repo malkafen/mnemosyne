@@ -159,6 +159,24 @@ class DomainOps {
     return diskPaths;
   }
 
+  boolean updateRam(String name, long ramMiB) throws LibvirtException {
+    Domain d = connect.domainLookupByName(name);
+    try {
+      log.debug("Domain '{}': setting memory to {} MiB (config only)", name, ramMiB);
+      // libvirt-java has no setMemoryFlags, so the persistent config is redefined instead.
+      // INACTIVE is the stored config, so a running domain keeps its live memory untouched.
+      String patched = XmlUtil.withMemory(d.getXMLDesc(Domain.XMLFlags.INACTIVE), ramMiB);
+      freeDomainQuietly(connect.domainDefineXML(patched));
+      log.debug("Domain '{}': ram updated (applies after restart)", name);
+      return true;
+    } catch (LibvirtException e) {
+      log.debug("Failed to update ram for domain '{}'", name, e);
+      throw e;
+    } finally {
+      freeDomainQuietly(d);
+    }
+  }
+
   boolean updateCpu(String name, int cpu) throws LibvirtException {
     Domain d = connect.domainLookupByName(name);
     try {

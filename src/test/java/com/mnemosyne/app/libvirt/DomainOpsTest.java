@@ -20,6 +20,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.libvirt.Connect;
 import org.libvirt.Domain;
 import org.libvirt.LibvirtException;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
@@ -156,6 +157,63 @@ public class DomainOpsTest {
       // Act
       assertThatThrownBy(() -> domainOps.undefineDomain("toDelete")).isSameAs(boom);
       // Assert
+      verify(domain).free();
+    }
+  }
+
+  @Nested
+  @DisplayName("updateRam()")
+  class UpdateRam {
+
+    @Test
+    void updateRam_redefinesPersistentConfigWithPatchedXml() throws Exception {
+      // Arrange
+      Domain redefined = mock(Domain.class);
+      when(connect.domainLookupByName("test-vm.example.net")).thenReturn(domain);
+      when(domain.getXMLDesc(Domain.XMLFlags.INACTIVE)).thenReturn(loadXml("managed-domain.xml"));
+      when(connect.domainDefineXML(anyString())).thenReturn(redefined);
+      DomainOps domainOps = new DomainOps(connect);
+      // Act
+      boolean result = domainOps.updateRam("test-vm.example.net", 4096);
+      // Assert
+      assertThat(result).isTrue();
+
+      ArgumentCaptor<String> xml = ArgumentCaptor.forClass(String.class);
+      verify(connect).domainDefineXML(xml.capture());
+      assertThat(XmlUtil.getShortState(xml.getValue()).ram()).isEqualTo(4096);
+
+      // The fixture starts at 2 GiB; the rest of the domain must survive the patch.
+      assertThat(XmlUtil.getShortState(xml.getValue()).serverId()).isEqualTo("test-vm.example.net");
+      assertThat(XmlUtil.getShortState(xml.getValue()).cpu()).isEqualTo(2);
+
+      verify(domain).free();
+      verify(redefined).free();
+    }
+
+    @Test
+    void updateRam_readsStoredConfigNotLiveState() throws Exception {
+      // INACTIVE is what keeps a running domain's live memory untouched.
+      // Arrange
+      when(connect.domainLookupByName("test-vm.example.net")).thenReturn(domain);
+      when(domain.getXMLDesc(Domain.XMLFlags.INACTIVE)).thenReturn(loadXml("managed-domain.xml"));
+      when(connect.domainDefineXML(anyString())).thenReturn(mock(Domain.class));
+      DomainOps domainOps = new DomainOps(connect);
+      // Act
+      domainOps.updateRam("test-vm.example.net", 4096);
+      // Assert
+      verify(domain).getXMLDesc(Domain.XMLFlags.INACTIVE);
+    }
+
+    @Test
+    void updateRam_defineFails_rethrowsAndStillFreesHandle() throws Exception {
+      // Arrange
+      when(connect.domainLookupByName("test-vm.example.net")).thenReturn(domain);
+      when(domain.getXMLDesc(anyInt())).thenReturn(loadXml("managed-domain.xml"));
+      LibvirtException boom = mock(LibvirtException.class);
+      doThrow(boom).when(connect).domainDefineXML(anyString());
+      DomainOps domainOps = new DomainOps(connect);
+      // Act & Assert
+      assertThatThrownBy(() -> domainOps.updateRam("test-vm.example.net", 4096)).isSameAs(boom);
       verify(domain).free();
     }
   }
