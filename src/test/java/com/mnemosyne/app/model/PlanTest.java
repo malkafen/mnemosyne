@@ -60,7 +60,12 @@ public class PlanTest {
   }
 
   private static DomainState domain(int cpu, long ram) {
-    return new DomainState("web-01", cpu, ram, "web-01", "1", "mnemosyne", List.of(), true, false);
+    return domain(cpu, ram, true, false);
+  }
+
+  private static DomainState domain(int cpu, long ram, boolean active, boolean autostart) {
+    return new DomainState(
+        "web-01", cpu, ram, "web-01", "1", "mnemosyne", List.of(), active, autostart);
   }
 
   @Test
@@ -84,6 +89,50 @@ public class PlanTest {
     Plan result = new Plan(List.of(domain(2, 2048)), servers, false);
     // Assert
     assertThat(result.getToUpdate()).isEmpty();
+  }
+
+  @Test
+  void plan_runningDomainWithLaunchFalse_landsInToUpdate() {
+    // Arrange
+    Server s = server(2, 2048);
+    s.setLaunch(false);
+    // Act
+    Plan result = new Plan(List.of(domain(2, 2048, true, false)), Map.of("web-01", s), false);
+    // Assert
+    assertThat(result.getToUpdate().keySet()).containsExactly("web-01");
+    assertThat(result.getToUpdate().get("web-01").diff()).isEqualTo("power on->off");
+  }
+
+  @Test
+  void plan_shutOffDomainWithLaunchTrue_landsInToUpdate() {
+    // Arrange
+    Map<String, Server> servers = Map.of("web-01", server(2, 2048));
+    // Act
+    Plan result = new Plan(List.of(domain(2, 2048, false, false)), servers, false);
+    // Assert
+    assertThat(result.getToUpdate().get("web-01").diff()).isEqualTo("power off->on");
+  }
+
+  @Test
+  void plan_autostartUnset_staysOutOfToUpdate() {
+    // An absent autostart is not desired state, so the domain's own flag is left alone.
+    // Arrange
+    Map<String, Server> servers = Map.of("web-01", server(2, 2048));
+    // Act
+    Plan result = new Plan(List.of(domain(2, 2048, true, true)), servers, false);
+    // Assert
+    assertThat(result.getToUpdate()).isEmpty();
+  }
+
+  @Test
+  void plan_autostartDiffers_landsInToUpdate() {
+    // Arrange
+    Server s = server(2, 2048);
+    s.setAutostart(true);
+    // Act
+    Plan result = new Plan(List.of(domain(2, 2048, true, false)), Map.of("web-01", s), false);
+    // Assert
+    assertThat(result.getToUpdate().get("web-01").diff()).isEqualTo("autostart false->true");
   }
 
   @Test

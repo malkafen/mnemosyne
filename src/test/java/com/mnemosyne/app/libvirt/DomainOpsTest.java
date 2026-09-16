@@ -219,6 +219,79 @@ public class DomainOpsTest {
   }
 
   @Nested
+  @DisplayName("power")
+  class Power {
+
+    @Test
+    void startDomain_bootsDomainAndFreesHandle() throws LibvirtException {
+      // Arrange
+      when(connect.domainLookupByName("web-01")).thenReturn(domain);
+      DomainOps domainOps = new DomainOps(connect);
+      // Act
+      domainOps.startDomain("web-01");
+      // Assert
+      verify(domain).create();
+      verify(domain).free();
+    }
+
+    @Test
+    void shutdownDomain_inactiveDomain_asksForNothing() throws LibvirtException {
+      // Arrange
+      when(connect.domainLookupByName("web-01")).thenReturn(domain);
+      when(domain.isActive()).thenReturn(0);
+      DomainOps domainOps = new DomainOps(connect);
+      // Act
+      domainOps.shutdownDomain("web-01");
+      // Assert
+      verify(domain, never()).shutdown();
+      verify(domain, never()).destroy();
+      verify(domain).free();
+    }
+
+    @Test
+    void shutdownDomain_guestStopsInTime_isNotDestroyed() throws LibvirtException {
+      // Running at first, shut off on the next poll: the guest obeyed, so no hard destroy.
+      // Arrange
+      when(connect.domainLookupByName("web-01")).thenReturn(domain);
+      when(domain.isActive()).thenReturn(1, 0);
+      DomainOps domainOps = new DomainOps(connect);
+      // Act
+      domainOps.shutdownDomain("web-01");
+      // Assert
+      verify(domain).shutdown();
+      verify(domain, never()).destroy();
+      verify(domain).free();
+    }
+
+    @Test
+    void updateAutostart_setsFlagAndFreesHandle() throws LibvirtException {
+      // Arrange
+      when(connect.domainLookupByName("web-01")).thenReturn(domain);
+      DomainOps domainOps = new DomainOps(connect);
+      // Act
+      domainOps.updateAutostart("web-01", true);
+      // Assert
+      verify(domain).setAutostart(true);
+      verify(domain).free();
+    }
+
+    @Test
+    void setupDomain_autostartFails_undefinesTheDomainItJustDefined() throws LibvirtException {
+      // Arrange
+      when(connect.domainDefineXML(anyString())).thenReturn(domain);
+      when(connect.domainLookupByName("web-01")).thenReturn(domain);
+      LibvirtException boom = mock(LibvirtException.class);
+      doThrow(boom).when(domain).setAutostart(true);
+      DomainOps domainOps = new DomainOps(connect);
+      DomainOps.DomainSpec spec = new DomainOps.DomainSpec("web-01", "<domain/>", true, true);
+      // Act & Assert
+      assertThatThrownBy(() -> domainOps.setupDomain(spec)).isSameAs(boom);
+      verify(domain).undefine();
+      verify(domain, never()).create();
+    }
+  }
+
+  @Nested
   @DisplayName("readActualState()")
   class ReadActualState {
 
@@ -238,6 +311,22 @@ public class DomainOpsTest {
       assertThat(actual.get(0).managed()).isTrue();
       assertThat(actual.get(0).disks()).containsExactly("/var/lib/libvirt/images/test-vm.qcow2");
       verify(domains[0]).free();
+    }
+
+    @Test
+    void readActualState_attachesPowerStateAndAutostart() throws Exception {
+      // Neither fact is in the domain XML; both come off the domain handle.
+      // Arrange
+      when(connect.listAllDomains(anyInt())).thenReturn(domains);
+      when(domain.getXMLDesc(anyInt())).thenReturn(loadXml("managed-domain.xml"));
+      when(domain.isActive()).thenReturn(1);
+      when(domain.getAutostart()).thenReturn(true);
+      DomainOps domainOps = new DomainOps(connect);
+      // Act
+      List<DomainState> actual = domainOps.readActualState();
+      // Assert
+      assertThat(actual.get(0).active()).isTrue();
+      assertThat(actual.get(0).autostart()).isTrue();
     }
 
     @Test
