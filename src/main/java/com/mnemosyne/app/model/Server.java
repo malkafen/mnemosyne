@@ -76,7 +76,11 @@ public class Server {
   @NotBlank(message = "Libvirt network name is required")
   private String network = "default";
 
+  /** Whether the VM should be running; reconciled on every run, not only at creation. */
   private boolean launch = true;
+
+  /** Libvirt autostart; {@code null} leaves whatever the domain already has. */
+  private Boolean autostart;
 
   public record Seed(String name, String metaData, String userData, String networkConfig) {}
 

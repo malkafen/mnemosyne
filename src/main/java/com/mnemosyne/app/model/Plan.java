@@ -20,11 +20,29 @@ public final class Plan {
       return server.getRam() != actual.ram();
     }
 
+    public boolean powerChanged() {
+      return server.isLaunch() != actual.active();
+    }
+
+    /** An unset {@code autostart} is not desired state, so it never counts as drift. */
+    public boolean autostartChanged() {
+      return server.getAutostart() != null && server.getAutostart() != actual.autostart();
+    }
+
     public String diff() {
       StringBuilder sb = new StringBuilder();
-      if (cpuChanged()) sb.append(String.format(" cpu %d->%d", actual.cpu(), server.getCpu()));
-      if (ramChanged()) sb.append(String.format(" ram %d->%d", actual.ram(), server.getRam()));
-      return sb.toString().trim();
+      if (cpuChanged()) sb.append(String.format(", cpu %d->%d", actual.cpu(), server.getCpu()));
+      if (ramChanged()) sb.append(String.format(", ram %d->%d", actual.ram(), server.getRam()));
+      if (autostartChanged())
+        sb.append(String.format(", autostart %b->%b", actual.autostart(), server.getAutostart()));
+      if (powerChanged())
+        sb.append(
+            String.format(", power %s->%s", power(actual.active()), power(server.isLaunch())));
+      return sb.length() == 0 ? "" : sb.substring(2);
+    }
+
+    private static String power(boolean on) {
+      return on ? "on" : "off";
     }
   }
 
@@ -70,7 +88,8 @@ public final class Plan {
         managedD.values().stream()
             .filter(d -> servers.containsKey(d.serverId()))
             .map(d -> new Update(servers.get(d.serverId()), d))
-            .filter(u -> u.cpuChanged() || u.ramChanged())
+            .filter(
+                u -> u.cpuChanged() || u.ramChanged() || u.autostartChanged() || u.powerChanged())
             .collect(
                 Collectors.toMap(u -> u.actual().serverId(), u -> u, (a, b) -> a, TreeMap::new));
 
@@ -113,7 +132,8 @@ public final class Plan {
           report.sub(disks);
         });
     toUpdate.forEach((id, u) -> report.add("update", "~", id, u.diff()));
-    toCreate.keySet().forEach(n -> report.add("create", "+", n, ""));
+    toCreate.forEach(
+        (id, s) -> report.add("create", "+", id, s.isLaunch() ? "" : "off after init"));
     report.print(group, "no changes");
   }
 }

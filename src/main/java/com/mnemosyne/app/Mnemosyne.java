@@ -94,6 +94,11 @@ class Mnemosyne {
       if (!CloudInitServer.waitForCloudInit().get()) {
         log.error("cloud-init did not finish on all servers — see warnings above");
       }
+
+      if (irides.stream().anyMatch(i -> i.harmonia().hasPendingStop())) {
+        Report.heading("Settled");
+        for (Iris i : irides) i.harmonia().settle();
+      }
     } finally {
       shutdown();
     }

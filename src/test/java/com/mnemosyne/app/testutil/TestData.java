@@ -41,14 +41,34 @@ public final class TestData {
     return servers;
   }
 
+  // Every sample server keeps the default launch:true and an unset autostart, so the domains are
+  // running and their autostart is left out of the diff.
   public static List<DomainState> sampleDomainStates() {
     return new ArrayList<>(
         List.of(
             new DomainState(
-                "toUpdate", testCpu + 1, testRam, "toUpdate", "1", "mnemosyne", List.of()),
+                "toUpdate",
+                testCpu + 1,
+                testRam,
+                "toUpdate",
+                "1",
+                "mnemosyne",
+                List.of(),
+                true,
+                false),
             new DomainState(
-                "toDelete-vm", testCpu, testRam, "toDelete-id", "1", "mnemosyne", DISKPATHS),
-            new DomainState("neverToDelete", testCpu, testRam, null, null, null, List.of()),
-            new DomainState("toAdopt", testCpu, testRam, null, null, null, List.of())));
+                "toDelete-vm",
+                testCpu,
+                testRam,
+                "toDelete-id",
+                "1",
+                "mnemosyne",
+                DISKPATHS,
+                true,
+                false),
+            new DomainState(
+                "neverToDelete", testCpu, testRam, null, null, null, List.of(), true, false),
+            new DomainState(
+                "toAdopt", testCpu, testRam, null, null, null, List.of(), true, false)));
   }
 }

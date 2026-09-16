@@ -4,6 +4,7 @@ import com.mnemosyne.app.model.DomainState;
 import com.mnemosyne.app.utils.XmlUtil;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.TimeUnit;
 import org.libvirt.Connect;
 import org.libvirt.Domain;
 import org.libvirt.LibvirtException;
@@ -13,28 +14,33 @@ import org.slf4j.LoggerFactory;
 class DomainOps {
 
   private static final Logger log = LoggerFactory.getLogger(DomainOps.class);
+
+  /** How long a guest is given to shut down on its own before it is destroyed. */
+  private static final long SHUTDOWN_TIMEOUT_MS = 60_000L;
+
+  private static final long SHUTDOWN_POLL_MS = 2000L;
+
   private final Connect connect;
 
   public DomainOps(Connect connect) {
     this.connect = connect;
   }
 
-  record DomainSpec(String name, String domainXml, boolean isLaunch) {}
+  record DomainSpec(String name, String domainXml, boolean isLaunch, Boolean autostart) {}
 
   void setupDomain(DomainSpec spec) throws LibvirtException {
     Domain d = defineDomain(spec);
     try {
-      if (spec.isLaunch()) {
+      try {
+        if (spec.autostart() != null) setAutostart(d, spec.name(), spec.autostart());
+        if (spec.isLaunch()) createDomain(d, spec.name());
+      } catch (LibvirtException e) {
         try {
-          createDomain(d, spec.name());
-        } catch (LibvirtException e) {
-          try {
-            undefineDomain(spec.name());
-          } catch (LibvirtException u) {
-            e.addSuppressed(u);
-          }
-          throw e;
+          undefineDomain(spec.name());
+        } catch (LibvirtException u) {
+          e.addSuppressed(u);
         }
+        throw e;
       }
     } finally {
       freeDomainQuietly(d);
@@ -63,6 +69,72 @@ class DomainOps {
       log.debug("Domain '{}' has been started successfully.", name);
     } catch (LibvirtException e) {
       log.debug("Failed to create domain '{}': {}.", name, e.getMessage(), e);
+      throw e;
+    }
+  }
+
+  /** Boots an already defined domain. */
+  void startDomain(String name) throws LibvirtException {
+    Domain d = connect.domainLookupByName(name);
+    try {
+      createDomain(d, name);
+    } finally {
+      freeDomainQuietly(d);
+    }
+  }
+
+  /**
+   * Asks the guest to shut down and waits for it; a guest that is still running after {@link
+   * #SHUTDOWN_TIMEOUT_MS} is destroyed, so the run always converges on the inventory.
+   */
+  void shutdownDomain(String name) throws LibvirtException {
+    Domain d = connect.domainLookupByName(name);
+    try {
+      if (d.isActive() == 0) {
+        log.debug("Domain '{}' is already shut off", name);
+        return;
+      }
+      log.debug("Domain '{}': requesting shutdown...", name);
+      d.shutdown();
+
+      long deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(SHUTDOWN_TIMEOUT_MS);
+      while (d.isActive() == 1) {
+        if (System.nanoTime() >= deadline) {
+          log.debug(
+              "Domain '{}' still running after {}s, destroying", name, SHUTDOWN_TIMEOUT_MS / 1000);
+          d.destroy();
+          return;
+        }
+        Thread.sleep(SHUTDOWN_POLL_MS);
+      }
+      log.debug("Domain '{}' shut down successfully", name);
+    } catch (InterruptedException e) {
+      Thread.currentThread().interrupt();
+      log.debug("Interrupted while waiting for domain '{}' to shut down", name);
+    } catch (LibvirtException e) {
+      log.debug("Failed to shut down domain '{}'", name, e);
+      throw e;
+    } finally {
+      freeDomainQuietly(d);
+    }
+  }
+
+  void updateAutostart(String name, boolean autostart) throws LibvirtException {
+    Domain d = connect.domainLookupByName(name);
+    try {
+      setAutostart(d, name, autostart);
+    } finally {
+      freeDomainQuietly(d);
+    }
+  }
+
+  private static void setAutostart(Domain d, String name, boolean autostart)
+      throws LibvirtException {
+    try {
+      log.debug("Domain '{}': setting autostart to {}", name, autostart);
+      d.setAutostart(autostart);
+    } catch (LibvirtException e) {
+      log.debug("Failed to set autostart for domain '{}'", name, e);
       throw e;
     }
   }
@@ -111,7 +183,9 @@ class DomainOps {
     try {
       List<DomainState> actual = new ArrayList<>(domains.length);
       for (Domain d : domains)
-        actual.add(XmlUtil.getShortState(d.getXMLDesc(Domain.XMLFlags.INACTIVE)));
+        actual.add(
+            XmlUtil.getShortState(d.getXMLDesc(Domain.XMLFlags.INACTIVE))
+                .withRuntime(d.isActive() == 1, d.getAutostart()));
       return actual;
     } finally {
       for (Domain d : domains) freeDomainQuietly(d);

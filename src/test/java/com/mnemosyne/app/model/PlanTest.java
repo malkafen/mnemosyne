@@ -60,7 +60,7 @@ public class PlanTest {
   }
 
   private static DomainState domain(int cpu, long ram) {
-    return new DomainState("web-01", cpu, ram, "web-01", "1", "mnemosyne", List.of());
+    return new DomainState("web-01", cpu, ram, "web-01", "1", "mnemosyne", List.of(), true, false);
   }
 
   @Test
@@ -100,6 +100,6 @@ public class PlanTest {
     // Act
     String diff = new Plan.Update(server(4, 4096), domain(2, 2048)).diff();
     // Assert
-    assertThat(diff).isEqualTo("cpu 2->4 ram 2048->4096");
+    assertThat(diff).isEqualTo("cpu 2->4, ram 2048->4096");
   }
 }

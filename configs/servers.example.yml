@@ -43,7 +43,11 @@
       disk: 30                       # disk size in GiB (minimum 10); base image is resized to this
       pool: "default"                # libvirt storage pool holding the base image and new disk
       network: "host-bridge"         # libvirt network / bridge to attach the VM to
-      launch: true                   # start the VM after it is defined
+      launch: true                   # the VM must be running; every run brings it to this state.
+                                     # A new VM boots once regardless, so cloud-init can configure
+                                     # it, and is shut down again at the end of that run.
+      autostart: true                # optional: libvirt autostart when the hypervisor boots.
+                                     # Omit the key to leave the domain's own setting alone.
       # volLookup / metaUrl / templates are inherited from the group above.
 
     # --- VM #2: a cache node (relies on field defaults where possible) ---
