@@ -4,6 +4,24 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- `autostart: true|false` is an optional per-VM flag mapped to libvirt's autostart.
+  Left out, the domain's own setting is neither read as drift nor changed.
+
+### Changed
+- `launch` is now reconciled on every run instead of only at creation: a managed domain
+  that is shut off while the inventory says `launch: true` is started, and one that runs
+  while the inventory says `launch: false` is asked to shut down and destroyed if it is
+  still up after 60 seconds. Power and autostart drift are reported as ordinary `update`
+  entries, so the plan gains no new category.
+- A new VM now boots once regardless of `launch`, so cloud-init always configures it; one
+  with `launch: false` is shut down at the end of the same run, reported under `Settled`.
+  Starting an existing VM therefore needs no cloud-init seed and is never awaited.
+- `applies after restart` is printed only when the domain keeps running; a VM that is shut
+  down in the same pass picks up its new vCPU/RAM on the next boot anyway.
+
 ## [0.2.0] - 2026-09-16
 
 ### Added

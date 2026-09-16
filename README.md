@@ -28,7 +28,8 @@ datasource served by a built-in HTTP server.
 3. Every domain on the host is read back into a state snapshot (name, vCPU, RAM, `serverId`,
    `managedBy`, disk paths) and diffed against the inventory:
    - **create** — inventory entries with no managed domain and no name collision with an unmanaged one;
-   - **update** — managed domains whose vCPU count or RAM differs from the inventory;
+   - **update** — managed domains whose vCPU count, RAM, power state or autostart flag differs
+     from the inventory;
    - **delete** — managed domains no longer listed in the inventory (suppressed by `--no-delete`);
    - **unmanaged** — everything else, reported but untouched.
    With `--plan` the run stops here.
@@ -36,14 +37,20 @@ datasource served by a built-in HTTP server.
    confirmation window (`Ctrl+C` aborts).
 5. Each group is reconciled in the order delete, update, create:
    - **delete** destroys and undefines the domain, then deletes its file-backed volumes;
-   - **update** changes vCPU count via libvirt and RAM by redefining the persistent config. Both take
-     effect on the next boot of the guest; the running domain is left alone;
+   - **update** changes vCPU count via libvirt and RAM by redefining the persistent config, then
+     autostart, then power: a domain that should be running is started, one that should not is asked
+     to shut down and is destroyed if it is still up after 60 seconds. vCPU and RAM take effect on
+     the guest's next boot, so a domain that keeps running is otherwise left alone;
    - **create** clones the base image (`volLookup`) inside the target pool, resizes it to the
-     requested capacity, registers the cloud-init seed, then defines and boots the domain. A volume
-     that already carries the VM's name is reused; a failed resize is rolled back.
+     requested capacity, registers the cloud-init seed, then defines and boots the domain. A new VM
+     always boots once, whatever `launch` says, so cloud-init can configure it; a VM with
+     `launch: false` is shut down again at the end of the run. A volume that already carries the
+     VM's name is reused; a failed resize is rolled back.
    Failures are per-VM: the entry is reported as skipped and the run continues.
 6. Mnemosyne waits for every new guest to report back over cloud-init's `phone_home`, polling every
-   5 seconds up to 5 minutes, then closes the connections and stops the HTTP server.
+   5 seconds up to 5 minutes. Guests created with `launch: false` are then shut down — reported
+   under `Settled` — and the connections and the HTTP server are closed. Starting an existing VM
+   needs no seed and is never awaited: every managed VM has already been through cloud-init.
 
 Guests find their configuration through the SMBIOS serial `ds=nocloud;s=<metaUrl><name>/`, which
 points cloud-init at `meta-data`, `user-data`, `network-config` and `vendor-data` on Mnemosyne's
@@ -132,6 +139,9 @@ still override them individually.
       disk: 30                            # GiB, minimum 10
       pool: "default"
       network: "host-bridge"
+      launch: true                        # the VM must be running; reconciled on every run.
+                                          # A new VM boots once regardless, for cloud-init.
+      autostart: false                    # optional; omitted, libvirt's own setting is left alone
 ```
 
 [`configs/servers.example.yml`](configs/servers.example.yml) documents every field, its default and
@@ -178,6 +188,15 @@ Applying in 10s — Ctrl+C to abort...
   - old-test.example.lan
   ~ cache-01  (cpu 2->4, applies after restart)
   + web-01
+```
+
+Servers created with `launch: false` are booted for cloud-init and shut down once it is done, in a
+closing block of its own:
+
+```
+--- Settled -------------------------------------------
+[ hv01.example.lan ]  stop: 1
+  - standby-01  (initialized)
 ```
 
 With `--join` the plan lists the unmanaged domains instead, marking the ones that can be adopted:

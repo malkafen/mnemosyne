@@ -68,6 +68,10 @@ public class XmlUtil {
    */
   public static final long KIB_PER_MIB = 1024L;
 
+  /**
+   * The XML-backed part of a domain's state. Power state and autostart are not in the XML; {@link
+   * DomainState#withRuntime(boolean, boolean)} fills them in from the domain handle.
+   */
   public static DomainState getShortState(String domainXml) {
 
     try {
@@ -79,7 +83,7 @@ public class XmlUtil {
 
       Element meta = firstNS(doc, MNEM_NS, "mnemosyne");
       if (meta == null) {
-        return new DomainState(name, cpu, ram, null, null, null, diskPaths(doc));
+        return new DomainState(name, cpu, ram, null, null, null, diskPaths(doc), false, false);
       }
 
       return new DomainState(
@@ -90,7 +94,9 @@ public class XmlUtil {
           // textNS(meta, MNEM_NS, "specHash"),
           textNS(meta, MNEM_NS, "specVersion"),
           textNS(meta, MNEM_NS, "managedBy"),
-          diskPaths(doc));
+          diskPaths(doc),
+          false,
+          false);
     } catch (ParserConfigurationException | SAXException | IOException e) {
       throw new XmlParseException("Failed to parse domain XML", e);
     }
