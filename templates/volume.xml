@@ -1,7 +1,39 @@
+<!--
+  Mnemosyne reference storage volume template
+  ===========================================
+  Describes the disk image created for a new VM. Mnemosyne rewrites <name> and <capacity>
+  (Server#buildVolumeXml), then clones the base image named by `volLookup` into this new
+  volume and resizes it to the requested capacity.
+
+  Values rewritten per VM:
+    <name>        volume name — the VM's domain name
+    <capacity>    disk size from the inventory; the UNIT IS NOT REWRITTEN, so `unit`
+                  below must stay GiB, which is what the inventory's `disk:` field means
+
+  <volume> carries no type= attribute: libvirt derives it from the target storage pool,
+  which keeps this template usable with any file-backed pool.
+-->
 <volume>
-    <name></name>
-    <capacity unit="G"></capacity>
-    <target>
-        <format type="qcow2"/>
-    </target>
+  <name></name>
+
+  <!-- Virtual size the guest sees. Rewritten per VM; must remain in GiB. -->
+  <capacity unit="GiB"></capacity>
+
+  <!--
+    Sparse allocation: the image starts near zero bytes on the host and grows as the guest
+    writes. Without this libvirt may fully preallocate, so a 30 GiB VM would consume 30 GiB
+    the moment it is created and cloning would be slow.
+    Combined with discard='unmap' in server.xml, `fstrim` inside the guest returns freed
+    space to the host again.
+  -->
+  <allocation unit="bytes">0</allocation>
+
+  <target>
+    <!--
+      qcow2 is required here: it is what `volLookup` base cloud images use, and what makes
+      sparse allocation and snapshots possible. Raw would be marginally faster but always
+      fully allocated.
+    -->
+    <format type="qcow2"/>
+  </target>
 </volume>

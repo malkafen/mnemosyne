@@ -1,7 +1,42 @@
+<!--
+  Mnemosyne reference domain template
+  ===================================
+  A libvirt domain (a VM) definition. Mnemosyne parses this file per VM, rewrites the
+  few values it owns, and hands the result to `virDomainDefineXML`. EVERYTHING ELSE IS
+  PASSED THROUGH AS WRITTEN, so this file is the single place that decides what virtual
+  hardware every guest gets.
 
+  Values rewritten per VM (Server#buildServerXml); the elements must exist, but their
+  content is ignored, hence the empty placeholders:
+
+    <name>                          libvirt domain name
+    <memory>                        RAM; both the value and unit='KiB' are rewritten
+    <vcpu>                          vCPU count
+    <mnem:serverId>                 the inventory key Mnemosyne matches domains on
+    <entry name='serial'>           cloud-init NoCloud datasource URL
+    <disk device='disk'>/<source>   @file — path of the cloned volume (first such disk)
+    <interface>/<source>            @network — libvirt network name (first interface)
+
+  Design rules this template follows, so that it works on ANY libvirt/KVM host:
+    * Nothing host-specific is hardcoded. No <emulator> path (it differs between Debian
+      and RHEL), no pinned machine version, no manually assigned PCI/virtio addresses —
+      libvirt fills all of those in from the host's own capabilities at define time.
+    * Everything that changes guest BEHAVIOUR is stated explicitly rather than left to a
+      libvirt default that may change between versions.
+
+  Copy this file and point `templates.serverTmpl` at your copy to customise it.
+-->
 <domain type='kvm'>
+
   <name></name>
 
+  <!--
+    Mnemosyne's ownership marker. `managedBy` is what separates a VM Mnemosyne may
+    create/update/delete from a pre-existing one it must never touch; `serverId` is the
+    stable identity, which is why a VM can be renamed without being recreated.
+    Do not remove this block.
+    `specHash` is currently reserved: Mnemosyne neither writes nor reads it yet.
+  -->
   <metadata>
     <mnem:mnemosyne xmlns:mnem='https://mnemosyne.dev/schema/v1'>
       <mnem:managedBy>mnemosyne</mnem:managedBy>
@@ -11,55 +46,174 @@
     </mnem:mnemosyne>
   </metadata>
 
-  <!-- unit and value are both rewritten by Mnemosyne; domain XML is KiB throughout -->
+  <!--
+    Boot-time maximum memory. Mnemosyne rewrites both the value and the unit, so a copy
+    of this file can never drift into defining a domain 1024x too large.
+    <currentMemory> (the balloon target) is deliberately absent: libvirt sets it equal to
+    <memory> at define time, and Mnemosyne only rewrites it later, on an update.
+  -->
   <memory unit='KiB'></memory>
-  <vcpu></vcpu>
+  <vcpu placement='static'></vcpu>
 
   <os>
-    <type arch='x86_64' machine='pc-q35-7.2'>hvm</type>
+    <!--
+      machine='q35' is intentionally unversioned. libvirt expands it to the newest q35 the
+      host's QEMU supports (e.g. pc-q35-8.2), so the same template defines a domain on any
+      hypervisor. Pin it ('pc-q35-8.2') only if you live-migrate between hosts and need the
+      virtual hardware to be bit-for-bit identical — and then only to a version every host
+      actually has, or `define` will fail there.
+      Firmware is legacy BIOS (SeaBIOS): it needs no extra packages and no per-VM nvram
+      file. For UEFI you would add <firmware>/<loader>, install edk2/ovmf on every
+      hypervisor, and remember that Mnemosyne's delete path removes volumes, not nvram.
+    -->
+    <type arch='x86_64' machine='q35'>hvm</type>
+    <boot dev='hd'/>
+    <!-- Exposes the <sysinfo> block below to the guest; cloud-init reads it from there. -->
     <smbios mode='sysinfo'/>
   </os>
 
+  <!--
+    How the guest finds its configuration. cloud-init reads the SMBIOS system serial,
+    sees `ds=nocloud;s=<url>`, and fetches meta-data / user-data / network-config from
+    Mnemosyne's HTTP server. Remove this and a new VM is never configured.
+  -->
   <sysinfo type='smbios'>
     <system>
       <entry name='serial'></entry>
     </system>
   </sysinfo>
 
-  <devices>
-    <emulator>/usr/bin/qemu-system-x86_64</emulator>
+  <features>
+    <!--
+      acpi is REQUIRED for graceful shutdown: `virsh shutdown`, which is how Mnemosyne
+      stops a VM, works by pressing the ACPI power button. Without it the guest never
+      hears the request and is destroyed hard after the 60s timeout, every time.
+      apic gives the guest a modern interrupt controller; without it SMP is unreliable.
+    -->
+    <acpi/>
+    <apic/>
+  </features>
 
-    <!-- Основной диск -->
+  <!--
+    host-model: libvirt reads the host CPU and asks QEMU for the closest named model plus
+    the feature flags it can safely add, so guests get AES-NI/AVX instead of the ancient
+    qemu64 default. Unlike host-passthrough it still allows live migration between hosts
+    with comparable CPUs. Switch to <cpu mode='host-passthrough'/> for the last few
+    percent of performance, at the cost of pinning the VM to identical hardware.
+  -->
+  <cpu mode='host-model'/>
+
+  <!--
+    UTC hardware clock, matching how Linux cloud images expect to be booted.
+    rtc/catchup: after the host is busy or the VM is paused, the guest clock is sped up
+    until it has caught up, instead of silently drifting.
+    hpet is disabled — it is a known source of clock instability on Linux guests.
+  -->
+  <clock offset='utc'>
+    <timer name='rtc' tickpolicy='catchup'/>
+    <timer name='pit' tickpolicy='delay'/>
+    <timer name='hpet' present='no'/>
+  </clock>
+
+  <!--
+    on_reboot MUST be 'restart': the shipped user-data ends with `power_state: reboot`,
+    and 'destroy' here would leave every freshly provisioned VM powered off.
+    on_crash='restart' makes a crashed guest recover on its own rather than waiting for
+    the next Mnemosyne run; set it to 'destroy' if you would rather preserve the state
+    for a post-mortem.
+  -->
+  <on_poweroff>destroy</on_poweroff>
+  <on_reboot>restart</on_reboot>
+  <on_crash>restart</on_crash>
+
+  <!--
+    Suspend is disabled so a guest cannot put itself to sleep and drop off the network
+    while the hypervisor still reports it as running.
+  -->
+  <pm>
+    <suspend-to-mem enabled='no'/>
+    <suspend-to-disk enabled='no'/>
+  </pm>
+
+  <devices>
+
+    <!--
+      Main disk: the qcow2 volume Mnemosyne clones from the base image. @file is rewritten
+      per VM; this is also the disk Mnemosyne deletes when the VM leaves the inventory.
+      discard='unmap' passes guest TRIM through to the image, so `fstrim` inside the VM
+      actually shrinks the qcow2 file again — it pairs with the sparse volume.xml.
+      (Requires QEMU 4.0+ for virtio-blk; drop the attribute on older hypervisors.)
+      No cache=/io= is set on purpose: cache='none' io='native' is faster but needs
+      O_DIRECT, which some filesystems (NFS, tmpfs, some overlays) do not provide, and the
+      VM would then refuse to start. Add them if your pool is on plain local storage.
+    -->
     <disk type='file' device='disk'>
-      <driver name='qemu' type='qcow2'/>
+      <driver name='qemu' type='qcow2' discard='unmap'/>
       <source file=''/>
       <target dev='vda' bus='virtio'/>
     </disk>
 
-    <!-- Сеть обязательна (cloud-init HTTP) -->
+    <!--
+      One virtio NIC, attached to the libvirt network named in the inventory (@network is
+      rewritten per VM). Networking is mandatory: without it the guest cannot reach the
+      cloud-init server and the VM is never configured.
+      The MAC is left out so libvirt generates one; set it explicitly if you rely on DHCP
+      reservations. Only the FIRST <interface> is wired up by Mnemosyne — add more here
+      and you must configure them yourself.
+      For a plain host bridge rather than a libvirt network, this would need to be
+      <interface type='bridge'><source bridge='br0'/>, which Mnemosyne does not rewrite.
+    -->
     <interface type='network'>
       <source network=''/>
       <model type='virtio'/>
     </interface>
 
-    <!-- Последовательная консоль -->
+    <!--
+      Serial console, so `virsh console <name>` shows the boot log and cloud-init output —
+      the only way in when the guest fails to bring up networking. Debian/Ubuntu cloud
+      images already boot with console=ttyS0.
+    -->
+    <serial type='pty'>
+      <target port='0'/>
+    </serial>
     <console type='pty'>
       <target type='serial' port='0'/>
     </console>
 
-    <!-- virtio-serial контроллер для guest agent -->
+    <!--
+      QEMU guest agent channel. Lets the host read the guest's IPs and request a clean
+      filesystem-quiesced shutdown. The guest needs the qemu-guest-agent package, which
+      the shipped user-data installs. No <address> is given — libvirt assigns one.
+    -->
     <controller type='virtio-serial' index='0'/>
-    <!-- QEMU Guest Agent -->
     <channel type='unix'>
       <target type='virtio' name='org.qemu.guest_agent.0'/>
-      <address type='virtio-serial' controller='0' bus='0' port='1'/>
     </channel>
 
-    <!-- Maybe should comment for ubuntu -->
+    <!--
+      Entropy source. Without it the first boot can stall for seconds to minutes while the
+      guest gathers randomness for SSH host key generation and cloud-init.
+    -->
+    <rng model='virtio'>
+      <backend model='random'>/dev/urandom</backend>
+    </rng>
+
+    <!--
+      Balloon device. Required for the guest's memory to follow <currentMemory> when
+      Mnemosyne changes RAM on an existing domain.
+    -->
+    <memballoon model='virtio'/>
+
+    <!--
+      Graphical console, bound to loopback only: reach it with
+      `ssh -L 5900:127.0.0.1:5900 <hypervisor>` and a VNC client. It is the fallback for
+      debugging a guest whose serial console stays silent.
+      Drop this block if you only ever use `virsh console`; do NOT change the listen
+      address to 0.0.0.0, VNC here is unauthenticated.
+    -->
     <graphics type='vnc' port='-1' autoport='yes' listen='127.0.0.1'>
       <listen type='address' address='127.0.0.1'/>
     </graphics>
-
 
   </devices>
 </domain>
