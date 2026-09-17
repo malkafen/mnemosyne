@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Every run now checks what the planned creations need from the host before applying anything:
+  the storage pool, the base image `volLookup` inside it, the libvirt network, and the readability
+  of the template files. Problems are printed under `Preflight` and block the entire run — including
+  `--plan`, which exits non-zero — so a batch no longer fails halfway through with some VMs created
+  and the rest skipped. The checks are read-only and run over the connection the plan already uses:
+  one lookup per distinct pool, image and network, none at all for a group with nothing to create,
+  and a pool refresh only when the image is missing from libvirt's cache.
 - `autostart: true|false` is an optional per-VM flag mapped to libvirt's autostart.
   Left out, the domain's own setting is neither read as drift nor changed.
 

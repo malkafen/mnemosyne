@@ -1,6 +1,9 @@
 package com.mnemosyne.app.model;
 
 import jakarta.validation.constraints.*;
+import java.util.List;
+import java.util.Objects;
+import java.util.stream.Stream;
 import lombok.Getter;
 import lombok.Setter;
 
@@ -22,6 +25,13 @@ public class Templates {
 
   @NotBlank(message = "networkConfigTmpl must not be blank")
   private String networkConfigTmpl;
+
+  /** Every template file a server is rendered from, in the order the builders read them. */
+  public List<String> paths() {
+    return Stream.of(serverTmpl, volTmpl, metaDataTmpl, userDataTmpl, networkConfigTmpl)
+        .filter(Objects::nonNull)
+        .toList();
+  }
 
   public static Templates defaults() {
     Templates t = new Templates();

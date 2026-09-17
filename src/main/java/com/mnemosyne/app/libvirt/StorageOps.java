@@ -1,6 +1,7 @@
 package com.mnemosyne.app.libvirt;
 
 import com.mnemosyne.app.exception.*;
+import com.mnemosyne.app.model.Preflight.Problem;
 import java.util.List;
 import java.util.Optional;
 import org.libvirt.Connect;
@@ -27,6 +28,45 @@ class StorageOps {
     VolumeSpec {
       targetCapacity = targetCapacity * GIB;
     }
+  }
+
+  /**
+   * Read-only check that a clone could be made at all: the pool exists, it is running, and it holds
+   * the base image. The happy path pays for no refresh; it is spent only when the image is missing
+   * from libvirt's cache, which is exactly the case where a stale cache would be a false alarm.
+   */
+  Optional<Problem> checkBaseImage(String poolName, String volName) {
+    StoragePool pool;
+    try {
+      pool = connect.storagePoolLookupByName(poolName);
+    } catch (LibvirtException e) {
+      log.debug("Preflight: storage pool '{}' not found: {}", poolName, e.getMessage(), e);
+      return Optional.of(new Problem("pool '" + poolName + "'", "not found on the host"));
+    }
+    try {
+      if (pool.isActive() != 1) {
+        return Optional.of(
+            new Problem("pool '" + poolName + "'", "not running; start it with virsh pool-start"));
+      }
+      if (findExistingVolumePath(pool, volName).isPresent()) return Optional.empty();
+
+      log.debug("Preflight: base image '{}' not in pool '{}' cache, refreshing", volName, poolName);
+      pool.refresh(0);
+      if (findExistingVolumePath(pool, volName).isPresent()) return Optional.empty();
+
+      return Optional.of(
+          new Problem("image '" + volName + "'", "not found in pool '" + poolName + "'"));
+    } catch (LibvirtException e) {
+      log.debug("Preflight: checking pool '{}' failed: {}", poolName, e.getMessage(), e);
+      return Optional.of(new Problem("pool '" + poolName + "'", cause(e)));
+    } finally {
+      freePoolQuietly(pool);
+    }
+  }
+
+  private static String cause(LibvirtException e) {
+    String msg = e.getMessage();
+    return (msg == null || msg.isBlank()) ? e.getClass().getSimpleName() : msg.trim();
   }
 
   void deleteVolumes(List<String> diskPaths, String domainName) throws VolumeCleanupException {

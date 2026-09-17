@@ -10,7 +10,9 @@ import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
 import org.slf4j.Logger;
@@ -59,7 +61,9 @@ class Mnemosyne {
       new Mnemosyne().run(config);
     } catch (Exception e) {
       Throwable root = getRootCause(e);
-      log.error("Fatal: {} (cause: {})", e.getMessage(), root.getMessage());
+      // A failure raised by Mnemosyne itself is its own root cause; repeating it reads as noise.
+      if (root == e) log.error("Fatal: {}", e.getMessage());
+      else log.error("Fatal: {} (cause: {})", e.getMessage(), root.getMessage());
       log.debug("Fatal error details", e);
       System.exit(1);
     }
@@ -75,11 +79,15 @@ class Mnemosyne {
       }
 
       Report.heading("Plan");
+      Map<String, Preflight> blocked = new LinkedHashMap<>();
       for (Iris i : irides) {
-        i.harmonia
-            .plan(i.mnemon().getServers(), config.isDeleteDisable())
-            .print(i.mnemon.getGroup(), config.isJoin());
+        Plan plan = i.harmonia.plan(i.mnemon().getServers(), config.isDeleteDisable());
+        // Adoption creates nothing, so there is nothing to check for it.
+        Preflight preflight = config.isJoin() ? new Preflight() : i.harmonia.preflight();
+        plan.print(i.mnemon.getGroup(), config.isJoin(), preflight);
+        if (!preflight.ok()) blocked.put(i.mnemon.getGroup(), preflight);
       }
+      if (!blocked.isEmpty()) stop(blocked.size());
 
       if (config.isPlanOnly()) return;
       CloudInitServer.start();
@@ -102,6 +110,20 @@ class Mnemosyne {
     } finally {
       shutdown();
     }
+  }
+
+  /**
+   * Nothing is applied while any VM in the plan is blocked. Creation needs a storage pool, a base
+   * image, a network and the templates; without one of them the batch would fail somewhere in the
+   * middle, leaving half the inventory provisioned and the rest reported as skipped. The reason is
+   * already printed against the VM, so what is left to say is that none of the plan was carried
+   * out.
+   */
+  private void stop(int blockedGroups) {
+    System.out.printf(
+        "Nothing was applied: %d of %d group(s) cannot be created as planned.%n",
+        blockedGroups, irides.size());
+    throw new IllegalStateException("preflight failed");
   }
 
   private static void enableDebugLogging() {

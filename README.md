@@ -32,10 +32,19 @@ datasource served by a built-in HTTP server.
      from the inventory;
    - **delete** — managed domains no longer listed in the inventory (suppressed by `--no-delete`);
    - **unmanaged** — everything else, reported but untouched.
-   With `--plan` the run stops here.
-4. The cloud-init server starts on port 8080 under `/cloud-init`, followed by a 10-second
+4. Everything the planned **create** entries need is checked before the plan is printed: the
+   storage pool exists and is running, it holds the base image `volLookup`, the libvirt `network`
+   exists and is running, and the template files are readable on the machine running Mnemosyne.
+   Each pool, image and network is looked up once per distinct value, not once per VM, and a group
+   with nothing to create is not queried at all. The base image is looked up in libvirt's cache
+   first and the pool is refreshed only if the image is missing from it, so an image copied into
+   the pool a moment ago is still found. A VM that cannot be created is listed as `blocked` instead
+   of `create`, with the reason, and one blocked VM stops the whole run: nothing is created, updated
+   or deleted, in any group. `--join` creates nothing and is not checked.
+   With `--plan` the run stops after this.
+5. The cloud-init server starts on port 8080 under `/cloud-init`, followed by a 10-second
    confirmation window (`Ctrl+C` aborts).
-5. Each group is reconciled in the order delete, update, create:
+6. Each group is reconciled in the order delete, update, create:
    - **delete** destroys and undefines the domain, then deletes its file-backed volumes;
    - **update** changes vCPU count via libvirt and RAM by redefining the persistent config, then
      autostart, then power: a domain that should be running is started, one that should not is asked
@@ -47,7 +56,7 @@ datasource served by a built-in HTTP server.
      `launch: false` is shut down again at the end of the run. A volume that already carries the
      VM's name is reused; a failed resize is rolled back.
    Failures are per-VM: the entry is reported as skipped and the run continues.
-6. Mnemosyne waits for every new guest to report back over cloud-init's `phone_home`, polling every
+7. Mnemosyne waits for every new guest to report back over cloud-init's `phone_home`, polling every
    5 seconds up to 5 minutes. Guests created with `launch: false` are then shut down — reported
    under `Settled` — and the connections and the HTTP server are closed. Starting an existing VM
    needs no seed and is never awaited: every managed VM has already been through cloud-init.
@@ -198,6 +207,19 @@ Applying in 10s — Ctrl+C to abort...
   + web-01
 ```
 
+A prerequisite the host does not have turns a `create` entry into a `blocked` one and stops the run
+before the confirmation window — no VM is touched, in any group:
+
+```
+--- Plan ---------------------------------------------
+[ hv01.example.lan ]  delete: 1, blocked: 1
+  - old-test.example.lan
+      /var/lib/libvirt/images/old-test.example.lan
+  ! web-01  (network 'host-bridg' not found on the host)
+
+Nothing was applied: 1 of 2 group(s) cannot be created as planned.
+```
+
 Servers created with `launch: false` are booted for cloud-init and shut down once it is done, in a
 closing block of its own:
 
@@ -224,19 +246,21 @@ With `--join` the plan lists the unmanaged domains instead, marking the ones tha
 
 ```
 src/main/java/com/mnemosyne/app/
-  Mnemosyne.java              entry point: load, validate, plan, confirm, apply, wait
+  Mnemosyne.java              entry point: load, validate, plan, preflight, confirm, apply, wait
   config/Config.java          picocli command-line options
   model/Mnemon.java           hypervisor group; inventory loading and inheritance
   model/Server.java           one VM; XML and cloud-init rendering, validation constraints
   model/Templates.java        template paths, group defaults merged with per-server overrides
-  model/Plan.java             create/update/delete/adopt/unmanaged diff
+  model/Plan.java             create/update/delete/adopt/unmanaged diff and its console block
+  model/Preflight.java        unmet prerequisites of the planned creations, per VM
   model/DomainState.java      snapshot of a live domain
   libvirt/Hypervisor.java     qemu+ssh connection
-  libvirt/Harmonia.java       per-group orchestration: plan, reconcile, join
+  libvirt/Harmonia.java       per-group orchestration: plan, preflight, reconcile, join
   libvirt/DomainOps.java      define, boot, destroy, undefine, update, read metadata
-  libvirt/StorageOps.java     clone, resize and delete volumes
+  libvirt/StorageOps.java     clone, resize and delete volumes; pool and base image checks
+  libvirt/NetworkOps.java     libvirt network checks
   http/CloudInitServer.java   NoCloud seed server and phone_home tracking
-  output/Report.java          plan/applied console blocks
+  output/Report.java          plan/preflight/applied console blocks
   utils/XmlUtil.java          domain XML parsing and memory rewriting
 configs/                      inventory example
 templates/                    domain and volume XML, cloud-init YAML
