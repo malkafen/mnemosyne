@@ -21,8 +21,11 @@ public class Hypervisor {
     if (!keyFile.exists() || !keyFile.isFile()) {
       throw new IOException(String.format("SSH key file not found '%s' for host '%s'", key, host));
     }
+    // no_tty makes ssh give up instead of prompting when the key is not accepted: an unattended
+    // run has nobody to type a password, so it should fail rather than hang on the prompt.
     String uri =
-        String.format("qemu+ssh://%s@%s:%d/system?keyfile=%s&no_verify=1", user, host, port, key);
+        String.format(
+            "qemu+ssh://%s@%s:%d/system?keyfile=%s&no_verify=1&no_tty=1", user, host, port, key);
     log.debug("Connecting to hypervisor '{}' via '{}'", host, uri);
 
     Connect connect = new Connect(uri);

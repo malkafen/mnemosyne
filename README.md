@@ -23,8 +23,8 @@ datasource served by a built-in HTTP server.
 1. The inventory is parsed and validated with Jakarta Bean Validation. Any invalid field aborts the
    run with the offending path and message; nothing is contacted before this passes.
 2. A libvirt connection is opened per group over
-   `qemu+ssh://user@host:port/system?keyfile=<key>&no_verify=1`. The key must be an existing file on
-   the machine running Mnemosyne.
+   `qemu+ssh://user@host:port/system?keyfile=<key>&no_verify=1&no_tty=1`. The key must be an
+   existing file on the machine running Mnemosyne.
 3. Every domain on the host is read back into a state snapshot (name, vCPU, RAM, `serverId`,
    `managedBy`, disk paths) and diffed against the inventory:
    - **create** — inventory entries with no managed domain and no name collision with an unmanaged one;
