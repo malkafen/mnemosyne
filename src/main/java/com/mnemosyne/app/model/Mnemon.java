@@ -24,6 +24,7 @@ public class Mnemon {
   @NotBlank(message = "User must not be blank")
   private String user;
 
+  @NotBlank(message = "SSH key path must not be blank")
   private String key;
 
   @Min(value = 1, message = "Port must be >= 1")
