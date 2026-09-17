@@ -18,6 +18,7 @@ import lombok.Getter;
 import lombok.Setter;
 import org.w3c.dom.Document;
 import org.w3c.dom.Element;
+import org.w3c.dom.Node;
 import org.w3c.dom.NodeList;
 import org.xml.sax.SAXException;
 
@@ -109,17 +110,19 @@ public class Server {
   // XML builders
 
   public String buildVolumeXml() {
-    Document doc = loadXmlTemplate(this.templates.getVolTmpl());
-    setElementText(doc, "name", getName());
-    setElementText(doc, "capacity", String.valueOf(this.disk));
+    String tmpl = this.templates.getVolTmpl();
+    Document doc = loadXmlTemplate(tmpl);
+    setElementText(doc, tmpl, "name", getName());
+    setElementText(doc, tmpl, "capacity", String.valueOf(this.disk));
     return documentToString(doc);
   }
 
   public String buildServerXml() {
-    Document doc = loadXmlTemplate(this.templates.getServerTmpl());
-    setElementText(doc, "name", getName());
+    String tmpl = this.templates.getServerTmpl();
+    Document doc = loadXmlTemplate(tmpl);
+    setElementText(doc, tmpl, "name", getName());
     XmlUtil.setMemory(doc, "memory", this.ram);
-    setElementText(doc, "vcpu", String.valueOf(this.cpu));
+    setElementText(doc, tmpl, "vcpu", String.valueOf(this.cpu));
     setElementTextNS(doc, "https://mnemosyne.dev/schema/v1", "serverId", getId());
     setCloudInitSerial(doc);
     setDiskSource(doc);
@@ -140,9 +143,18 @@ public class Server {
   private void setElementTextNS(Document doc, String namespaceUri, String localName, String value) {
     NodeList nodes = doc.getElementsByTagNameNS(namespaceUri, localName);
     if (nodes.getLength() == 0) {
-      throw new IllegalStateException("Element not found: {" + namespaceUri + "}" + localName);
+      throw new TemplateException(
+          missing(this.templates.getServerTmpl(), "<{" + namespaceUri + "}" + localName + ">"));
     }
     nodes.item(0).setTextContent(value);
+  }
+
+  /**
+   * A template that cannot be filled in is a configuration error. Reporting it by name beats
+   * failing later with an NPE, or defining a domain whose disk source was silently left empty.
+   */
+  private String missing(String tmpl, String what) {
+    return "Template '" + tmpl + "' has no " + what + " to fill in for server '" + getName() + "'";
   }
 
   // XML helpers
@@ -151,10 +163,32 @@ public class Server {
     try {
       DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
       factory.setNamespaceAware(true);
+      // The reference templates are heavily commented. Neither the comments nor the blank lines
+      // they sit in belong in the XML handed to libvirt, which discards them anyway but echoes
+      // the whole document in trace logs.
+      factory.setIgnoringComments(true);
       DocumentBuilder builder = factory.newDocumentBuilder();
-      return builder.parse(new File(path));
+      Document doc = builder.parse(new File(path));
+      stripBlankText(doc.getDocumentElement());
+      return doc;
     } catch (ParserConfigurationException | SAXException | IOException e) {
       throw new XmlParseException("Failed to load XML template: " + path, e);
+    }
+  }
+
+  /**
+   * Drops whitespace-only text nodes. Without this the serializer indents on top of the template's
+   * own formatting and the result grows a ragged left margin with every nesting level.
+   */
+  private static void stripBlankText(Node node) {
+    NodeList children = node.getChildNodes();
+    for (int i = children.getLength() - 1; i >= 0; i--) {
+      Node child = children.item(i);
+      if (child.getNodeType() == Node.TEXT_NODE && child.getTextContent().isBlank()) {
+        node.removeChild(child);
+      } else if (child.getNodeType() == Node.ELEMENT_NODE) {
+        stripBlankText(child);
+      }
     }
   }
 
@@ -162,8 +196,11 @@ public class Server {
     return XmlUtil.serialize(doc, getName());
   }
 
-  private void setElementText(Document doc, String tag, String value) {
+  private void setElementText(Document doc, String tmpl, String tag, String value) {
     Element element = (Element) doc.getElementsByTagName(tag).item(0);
+    if (element == null) {
+      throw new TemplateException(missing(tmpl, "<" + tag + ">"));
+    }
     element.setTextContent(value);
   }
 
@@ -173,9 +210,11 @@ public class Server {
       Element entry = (Element) entries.item(i);
       if ("serial".equals(entry.getAttribute("name"))) {
         entry.setTextContent("ds=nocloud;s=" + seedUrl());
-        break;
+        return;
       }
     }
+    throw new TemplateException(
+        missing(this.templates.getServerTmpl(), "<sysinfo> <entry name='serial'>"));
   }
 
   private void setDiskSource(Document doc) {
@@ -185,23 +224,28 @@ public class Server {
       // main disk only, not the cdrom
       if ("disk".equals(disk.getAttribute("device"))) {
         Element source = (Element) disk.getElementsByTagName("source").item(0);
-        if (source != null) {
-          source.setAttribute("file", this.volPath);
+        if (source == null) {
+          throw new TemplateException(
+              missing(this.templates.getServerTmpl(), "<source> inside <disk device='disk'>"));
         }
-        break;
+        source.setAttribute("file", this.volPath);
+        return;
       }
     }
+    throw new TemplateException(missing(this.templates.getServerTmpl(), "<disk device='disk'>"));
   }
 
   private void setInterfaceNetwork(Document doc) {
-    NodeList ifaces = doc.getElementsByTagName("interface");
-    if (ifaces.getLength() > 0) {
-      Element iface = (Element) ifaces.item(0);
-      Element source = (Element) iface.getElementsByTagName("source").item(0);
-      if (source != null) {
-        source.setAttribute("network", this.network);
-      }
+    Element iface = (Element) doc.getElementsByTagName("interface").item(0);
+    if (iface == null) {
+      throw new TemplateException(missing(this.templates.getServerTmpl(), "<interface>"));
     }
+    Element source = (Element) iface.getElementsByTagName("source").item(0);
+    if (source == null) {
+      throw new TemplateException(
+          missing(this.templates.getServerTmpl(), "<source> inside <interface>"));
+    }
+    source.setAttribute("network", this.network);
   }
 
   // YAML builders

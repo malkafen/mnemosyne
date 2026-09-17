@@ -166,6 +166,14 @@ The shipped `templates/user-data.yml` and `templates/network-config.yml` are wor
 placeholder credentials — add your own SSH public keys to `user-data.yml` before the first run. The
 matching `*.example.yml` files carry the annotated reference.
 
+`templates/server.xml` and `templates/volume.xml` are reference definitions meant to run unchanged
+on any libvirt/KVM host: nothing host-specific is hardcoded — no emulator path, no pinned machine
+version, no manually assigned device addresses — so libvirt fills those in from each hypervisor's
+own capabilities. Everything that changes guest behaviour is stated explicitly instead, and every
+element carries a comment explaining why it is there and what breaks without it. A template that
+lacks an element Mnemosyne must fill in is rejected by name rather than producing a half-configured
+domain.
+
 ## Output
 
 Plan and applied blocks share one format, so they line up entry by entry. Anything that fails is
