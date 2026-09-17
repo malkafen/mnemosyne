@@ -109,7 +109,12 @@ public final class Plan {
     this.unmanaged = unmanagedD.values().stream().map(d -> d.name()).sorted().toList();
   }
 
-  public void print(String group, boolean isJoin) {
+  /**
+   * The preflight result is printed with the plan rather than after it: a VM whose pool, image,
+   * network or template is missing is listed as {@code blocked} instead of {@code create}, so the
+   * plan shows what would actually happen and why it would not.
+   */
+  public void print(String group, boolean isJoin, Preflight preflight) {
     Report report = new Report();
 
     if (isJoin) {
@@ -133,7 +138,12 @@ public final class Plan {
         });
     toUpdate.forEach((id, u) -> report.add("update", "~", id, u.diff()));
     toCreate.forEach(
-        (id, s) -> report.add("create", "+", id, s.isLaunch() ? "" : "off after init"));
+        (id, s) -> {
+          List<String> blockers = preflight.blockers(id);
+          if (blockers.isEmpty())
+            report.add("create", "+", id, s.isLaunch() ? "" : "off after init");
+          else report.add("blocked", "!", id, String.join("; ", blockers));
+        });
     report.print(group, "no changes");
   }
 }

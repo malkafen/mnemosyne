@@ -6,10 +6,12 @@ import com.mnemosyne.app.libvirt.DomainOps.DomainSpec;
 import com.mnemosyne.app.libvirt.StorageOps.VolumeSpec;
 import com.mnemosyne.app.model.DomainState;
 import com.mnemosyne.app.model.Plan;
+import com.mnemosyne.app.model.Preflight;
 import com.mnemosyne.app.model.Server;
 import com.mnemosyne.app.output.Report;
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import org.libvirt.Connect;
@@ -21,6 +23,7 @@ public class Harmonia implements AutoCloseable {
 
   private final DomainOps domainOps;
   private final StorageOps storageOps;
+  private final NetworkOps networkOps;
   private final Connect connect;
   private final String group;
   private Plan plan;
@@ -35,6 +38,7 @@ public class Harmonia implements AutoCloseable {
     Connect c = Hypervisor.connect(user, key, host, port);
     this.domainOps = new DomainOps(c);
     this.storageOps = new StorageOps(c);
+    this.networkOps = new NetworkOps(c);
     this.connect = c;
     this.group = group;
   }
@@ -50,6 +54,49 @@ public class Harmonia implements AutoCloseable {
     List<DomainState> actual = domainOps.readActualState();
     this.plan = new Plan(actual, servers, deleteDisable);
     return this.plan;
+  }
+
+  /**
+   * Checks what every VM the plan would create needs from the host, before anything is applied.
+   * Nothing is cloned or defined for an update, an adoption or a delete, so only {@code toCreate}
+   * is checked and a group with nothing to create costs no calls at all. Pools, images and networks
+   * are looked up once per distinct value, not once per VM.
+   */
+  public Preflight preflight() {
+    Preflight preflight = new Preflight();
+    if (this.plan == null || this.plan.getToCreate().isEmpty()) {
+      log.debug("[ {} ] nothing to check (no VM to create)", group);
+      return preflight;
+    }
+    // Grouped by the value first, so a pool, an image or a network shared by twenty VMs is looked
+    // up once and reported once, against all the servers that need it.
+    Map<String, List<Server>> byImage = new LinkedHashMap<>();
+    Map<String, List<Server>> byNetwork = new LinkedHashMap<>();
+
+    for (Server s : this.plan.getToCreate().values()) {
+      byImage
+          .computeIfAbsent(s.getPool() + "\u001f" + s.getVolLookup(), k -> new ArrayList<>())
+          .add(s);
+      byNetwork.computeIfAbsent(s.getNetwork(), k -> new ArrayList<>()).add(s);
+      preflight.checkTemplates(s);
+    }
+    for (List<Server> servers : byImage.values()) {
+      Server first = servers.get(0);
+      storageOps
+          .checkBaseImage(first.getPool(), first.getVolLookup())
+          .ifPresent(p -> preflight.add(p, ids(servers)));
+    }
+    for (List<Server> servers : byNetwork.values()) {
+      networkOps
+          .checkNetwork(servers.get(0).getNetwork())
+          .ifPresent(p -> preflight.add(p, ids(servers)));
+    }
+    log.debug("[ {} ] preflight found {} problem(s)", group, preflight.getProblems().size());
+    return preflight;
+  }
+
+  private static List<String> ids(List<Server> servers) {
+    return servers.stream().map(Server::getId).toList();
   }
 
   public void join() {
