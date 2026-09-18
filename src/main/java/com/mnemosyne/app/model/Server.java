@@ -103,6 +103,14 @@ public class Server {
     return (name == null || name.isBlank()) ? id : name;
   }
 
+  /**
+   * The disk image is named after the VM plus the extension of the format the volume template
+   * creates, so a file-backed pool holds `<vm>.qcow2` next to the base images it was cloned from.
+   */
+  public String getVolName() {
+    return getName() + ".qcow2";
+  }
+
   public String getSpecHash() {
     return specHash(this.cpu, this.ram);
   }
@@ -112,7 +120,7 @@ public class Server {
   public String buildVolumeXml() {
     String tmpl = this.templates.getVolTmpl();
     Document doc = loadXmlTemplate(tmpl);
-    setElementText(doc, tmpl, "name", getName());
+    setElementText(doc, tmpl, "name", getVolName());
     setElementText(doc, tmpl, "capacity", String.valueOf(this.disk));
     return documentToString(doc);
   }
