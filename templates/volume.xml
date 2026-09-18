@@ -6,7 +6,8 @@
   volume and resizes it to the requested capacity.
 
   Values rewritten per VM:
-    <name>        volume name — the VM's domain name
+    <name>        volume name — the VM's domain name plus the `.qcow2` extension, so the image
+                  sits in the pool under the same name the guest is known by
     <capacity>    disk size from the inventory; the UNIT IS NOT REWRITTEN, so `unit`
                   below must stay GiB, which is what the inventory's `disk:` field means
 

@@ -185,7 +185,7 @@ public class Harmonia implements AutoCloseable {
       try {
         VolumeSpec volSpec =
             new VolumeSpec(
-                s.getName(), s.getPool(), s.buildVolumeXml(), s.getVolLookup(), s.getDisk());
+                s.getVolName(), s.getPool(), s.buildVolumeXml(), s.getVolLookup(), s.getDisk());
         s.setVolPath(storageOps.provisionVolume(volSpec));
         // A new VM always boots once so cloud-init can configure it; launch:false is honoured
         // afterwards, in settle().
