@@ -43,6 +43,90 @@ public class XmlUtilTest {
             "/var/lib/libvirt/images/system.qcow2", "/var/lib/libvirt/images/data.qcow2");
   }
 
+  private static final String DISKS_WITH_SERIALS =
+      """
+      <domain type="kvm">
+        <name>web-01</name>
+        <memory unit="KiB">2097152</memory>
+        <vcpu placement="static">2</vcpu>
+        <devices>
+          <disk type="file" device="disk">
+            <source file="/var/lib/libvirt/images/web-01.qcow2"/>
+            <target dev="vda" bus="virtio"/>
+          </disk>
+          <disk type="file" device="disk">
+            <source file="/var/lib/libvirt/images/web-01-data.qcow2"/>
+            <target dev="vdb" bus="virtio"/>
+            <serial>data</serial>
+          </disk>
+          <disk type="file" device="cdrom">
+            <source file="/var/lib/libvirt/images/seed.iso"/>
+            <target dev="hdc" bus="ide"/>
+          </disk>
+        </devices>
+        <serial type="pty">
+          <target port="0"/>
+        </serial>
+      </domain>
+      """;
+
+  @Test
+  void getShortState_readsTargetAndSerialOfEveryFileBackedDisk() {
+    // Act
+    DomainState state = XmlUtil.getShortState(DISKS_WITH_SERIALS);
+    // Assert
+    assertThat(state.disks())
+        .containsExactly(
+            new DomainState.Disk("vda", "/var/lib/libvirt/images/web-01.qcow2", null),
+            new DomainState.Disk("vdb", "/var/lib/libvirt/images/web-01-data.qcow2", "data"));
+  }
+
+  @Test
+  void disks_serialIsReadFromTheDiskNotFromTheConsoleDevice() {
+    // A document-wide lookup for <serial> would find <serial type="pty">, the console, and
+    // attribute its (empty) text to the root disk.
+    // Act
+    DomainState state = XmlUtil.getShortState(DISKS_WITH_SERIALS);
+    // Assert
+    assertThat(state.disks().get(0).serial()).isNull();
+  }
+
+  @Test
+  void diskVolName_isTheFileNameThatTheInventoryCanPredict() {
+    // This is what the plan matches an extra disk on.
+    // Act & Assert
+    assertThat(XmlUtil.getShortState(DISKS_WITH_SERIALS).disks().get(1).volName())
+        .isEqualTo("web-01-data.qcow2");
+  }
+
+  @Test
+  void usedDiskTargets_countsTheCdromToo() {
+    // The cdrom is not a disk Mnemosyne owns, but it owns a target name all the same, and giving
+    // that name to a data disk would collide.
+    // Act & Assert
+    assertThat(XmlUtil.usedDiskTargets(DISKS_WITH_SERIALS)).containsExactly("vda", "vdb", "hdc");
+  }
+
+  @Test
+  void poolTargetPath_readsADirectoryBackedPool() {
+    // Arrange
+    String pool =
+        """
+        <pool type="dir">
+          <name>default</name>
+          <target><path>/var/lib/libvirt/images</path></target>
+        </pool>
+        """;
+    // Act & Assert
+    assertThat(XmlUtil.poolTargetPath(pool)).isEqualTo("/var/lib/libvirt/images");
+  }
+
+  @Test
+  void poolTargetPath_poolWithoutADirectory_isNull() {
+    // Act & Assert
+    assertThat(XmlUtil.poolTargetPath("<pool type=\"rbd\"><name>ceph</name></pool>")).isNull();
+  }
+
   /** How libvirt actually renders a persistent config: KiB, with the balloon tag present. */
   private static final String DOMAIN_2_GIB =
       """

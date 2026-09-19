@@ -17,6 +17,10 @@
     <disk device='disk'>/<source>   @file — path of the cloned volume (first such disk)
     <interface>/<source>            @network — libvirt network name (first interface)
 
+  Added per VM, one per entry in the inventory's `extraDisks`: a copy of the first
+  <disk device='disk'> below, with its own <source file>, its own <target dev> and a
+  <serial> holding the disk's name. Nothing here has to be edited for that to work.
+
   Design rules this template follows, so that it works on ANY libvirt/KVM host:
     * Nothing host-specific is hardcoded. No <emulator> path (it differs between Debian
       and RHEL), no pinned machine version, no manually assigned PCI/virtio addresses —
@@ -146,6 +150,16 @@
       No cache=/io= is set on purpose: cache='none' io='native' is faster but needs
       O_DIRECT, which some filesystems (NFS, tmpfs, some overlays) do not provide, and the
       VM would then refuse to start. Add them if your pool is on plain local storage.
+
+      THIS BLOCK IS ALSO THE PROTOTYPE FOR `extraDisks`. Each extra disk is a copy of it
+      with @file, <target dev> and <serial> replaced, so whatever you tune here — bus,
+      discard, cache, io — every data disk of every VM gets as well, and there is one
+      place to change instead of two that can drift apart. <boot>, <address> and
+      <backingStore> are deliberately NOT copied: a data disk does not belong in the boot
+      chain, and libvirt assigns it a free address of its own.
+      The <target dev> of the extra disks continues from this one's bus prefix and skips
+      every name already used in this file, so adding a cdrom or a second disk here cannot
+      make two devices collide.
     -->
     <disk type='file' device='disk'>
       <driver name='qemu' type='qcow2' discard='unmap'/>

@@ -5,11 +5,17 @@
   (Server#buildVolumeXml), then clones the base image named by `volLookup` into this new
   volume and resizes it to the requested capacity.
 
+  The SAME template describes every disk in the inventory's `extraDisks`. Only the way the
+  volume is made differs: an extra disk has nothing to clone from, so it is created empty at
+  the capacity below and never resized. Its <name> is `<vm>-<disk>.qcow2`, which keeps two
+  VMs from claiming one file in a pool's flat namespace.
+
   Values rewritten per VM:
     <name>        volume name — the VM's domain name plus the `.qcow2` extension, so the image
-                  sits in the pool under the same name the guest is known by
+                  sits in the pool under the same name the guest is known by; for an extra
+                  disk, the VM's name, the disk's name and `.qcow2`
     <capacity>    disk size from the inventory; the UNIT IS NOT REWRITTEN, so `unit`
-                  below must stay GiB, which is what the inventory's `disk:` field means
+                  below must stay GiB, which is what `disk:` and `extraDisks[].size` mean
 
   <volume> carries no type= attribute: libvirt derives it from the target storage pool,
   which keeps this template usable with any file-backed pool.

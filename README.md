@@ -16,7 +16,8 @@ datasource served by a built-in HTTP server.
 | Server | One virtual machine, that is, one libvirt domain. |
 | `serverId` | The inventory map key. It is written into the domain's libvirt metadata and is the only identity Mnemosyne matches on, so a VM can be renamed without being recreated. |
 | managed / unmanaged | A domain is managed when it carries `managedBy: mnemosyne` metadata. Pre-existing domains are unmanaged and are never touched unless adopted with `--join`. |
-| Plan | The diff between the inventory (desired state) and the domains found on the host (current state), reported as `create`, `update`, `delete` plus the list of unmanaged domains. |
+| Plan | The diff between the inventory (desired state) and the domains found on the host (current state), reported as `create`, `update` and `delete`, plus `note` lines for what is seen but deliberately left alone. Unmanaged domains are listed under `--join`, which is what adopting them needs. |
+| Extra disk | An additional blank disk of a VM, declared under `extraDisks`. Add-only: created and attached when it is missing, never detached, resized or deleted while the VM exists. |
 
 ## How a run works
 
@@ -29,12 +30,14 @@ datasource served by a built-in HTTP server.
    `managedBy`, disk paths) and diffed against the inventory:
    - **create** — inventory entries with no managed domain and no name collision with an unmanaged one;
    - **update** — managed domains whose vCPU count, RAM, power state or autostart flag differs
-     from the inventory;
+     from the inventory, or that are missing an extra disk the inventory lists;
    - **delete** — managed domains no longer listed in the inventory (suppressed by `--no-delete`);
-   - **unmanaged** — everything else, reported but untouched.
-4. Everything the planned **create** entries need is checked before the plan is printed: the
-   storage pool exists and is running, it holds the base image `volLookup`, the libvirt `network`
-   exists and is running, and the template files are readable on the machine running Mnemosyne.
+   - **unmanaged** — everything else: never touched, and listed only under `--join`.
+4. Everything the planned **create** entries and disk attachments need is checked before the plan
+   is printed: every storage pool exists and is running, the pool of a VM being created holds the
+   base image `volLookup`, the libvirt `network` exists and is running, the template files are
+   readable on the machine running Mnemosyne, and no volume Mnemosyne is about to write to is
+   already attached to a different domain.
    Each pool, image and network is looked up once per distinct value, not once per VM, and a group
    with nothing to create is not queried at all. The base image is looked up in libvirt's cache
    first and the pool is refreshed only if the image is missing from it, so an image copied into
@@ -46,15 +49,16 @@ datasource served by a built-in HTTP server.
    confirmation window (`Ctrl+C` aborts).
 6. Each group is reconciled in the order delete, update, create:
    - **delete** destroys and undefines the domain, then deletes its file-backed volumes;
-   - **update** changes vCPU count via libvirt and RAM by redefining the persistent config, then
-     autostart, then power: a domain that should be running is started, one that should not is asked
-     to shut down and is destroyed if it is still up after 60 seconds. vCPU and RAM take effect on
-     the guest's next boot, so a domain that keeps running is otherwise left alone;
+   - **update** adds any missing extra disks first, then changes vCPU count via libvirt and RAM by
+     redefining the persistent config, then autostart, then power: a domain that should be running
+     is started, one that should not is asked to shut down and is destroyed if it is still up after
+     60 seconds. vCPU and RAM take effect on the guest's next boot, so a domain that keeps running
+     is otherwise left alone;
    - **create** clones the base image (`volLookup`) inside the target pool, resizes it to the
-     requested capacity, registers the cloud-init seed, then defines and boots the domain. A new VM
-     always boots once, whatever `launch` says, so cloud-init can configure it; a VM with
-     `launch: false` is shut down again at the end of the run. A volume that already carries the
-     VM's name is reused; a failed resize is rolled back.
+     requested capacity, creates any `extraDisks` as blank volumes, registers the cloud-init seed,
+     then defines and boots the domain. A new VM always boots once, whatever `launch` says, so
+     cloud-init can configure it; a VM with `launch: false` is shut down again at the end of the
+     run. A volume that already carries the expected name is reused; a failed resize is rolled back.
    Failures are per-VM: the entry is reported as skipped and the run continues.
 7. Mnemosyne waits for every new guest to report back over cloud-init's `phone_home`, polling every
    5 seconds up to 5 minutes. Guests created with `launch: false` are then shut down — reported
@@ -151,6 +155,12 @@ still override them individually.
       launch: true                        # the VM must be running; reconciled on every run.
                                           # A new VM boots once regardless, for cloud-init.
       autostart: false                    # optional; omitted, libvirt's own setting is left alone
+      extraDisks:                         # optional; blank disks, added after the root one
+        - name: data                      # -> /dev/disk/by-id/virtio-data in the guest
+          size: 40                        # GiB, at least 1
+        - name: logs
+          size: 50
+          pool: "fast-ssd"                # optional; defaults to the VM's own pool
 ```
 
 [`configs/servers.example.yml`](configs/servers.example.yml) documents every field, its default and
@@ -161,6 +171,61 @@ cp configs/servers.example.yml configs/servers.yml
 ```
 
 Local inventories (`configs/servers.yml`, `configs/servers_prod.yml`) are git-ignored.
+
+### Extra disks
+
+`extraDisks` adds blank qcow2 volumes next to the root disk. They reach the guest **raw** —
+partitioning, filesystems and `/etc/fstab` are the administrator's job, and nothing in Mnemosyne's
+cloud-init touches them.
+
+Each disk's `name` becomes two things: the volume file name in the pool (`web-01-data.qcow2`, with
+the VM's name in it because a pool's namespace is flat and shared by every VM on the host) and the
+disk's libvirt `<serial>`, which the guest exposes as `/dev/disk/by-id/virtio-<name>`:
+
+```
+# inside the guest
+/dev/disk/by-id/virtio-data -> ../../vdb
+/dev/disk/by-id/virtio-logs -> ../../vdc
+```
+
+The serial is also how Mnemosyne recognises the disk on later runs, in preference to the volume file
+name. That is what makes renaming a VM through `name:` safe: the disks it already has keep matching,
+so it is not handed a second, empty set of them next to the originals.
+
+**Partition the by-id path, not `/dev/vdb`.** The letters are assigned in the order the disks are
+listed, continuing after every target name the domain template already uses, so inserting a disk
+above an existing one shifts the letters of the ones below it. The by-id path does not move.
+
+Disks are **add-only**, and deliberately so: a data disk holds the only copy of whatever is on it,
+and Mnemosyne has no way to tell a disk that is safe to destroy from one that is not.
+
+| Change in the inventory | What happens |
+| --- | --- |
+| A new entry under `extraDisks` | The volume is created and the disk attached — to a VM being created, and to one that already exists. On a running guest it is hot-plugged; if the hypervisor or guest cannot, it is written to the persistent config and appears on the domain's next start, reported as `applies after power cycle`. |
+| An entry removed | **Nothing.** The disk stays attached and is reported as `not in the inventory - left as is`. Detach it with `virsh detach-disk` and delete the volume yourself if that is what you want. |
+| `size` changed | **Nothing yet.** The mismatch is reported as `left as is`; growing a disk is a separate operation, and shrinking one would destroy whatever sits past the new end. |
+| `pool` changed on an existing disk | **Nothing.** Data is never moved between pools; the disk is reported as missing from the new pool and left where it is. |
+| A disk attached by hand, outside the inventory | Reported once, never touched. |
+| The VM removed from the inventory | Its extra disks are deleted along with its root disk. The plan lists every volume by path before the confirmation window, so nothing disappears unannounced — and `--no-delete` keeps all of them. |
+
+**`applies after power cycle` means stopping and starting the domain**, not rebooting from inside
+the guest. A guest reboot keeps the same QEMU process, and with it exactly the devices the domain was
+launched with, so a disk that only reached the persistent config stays invisible until the domain
+itself is stopped and started: `launch: false` then `launch: true`, or `virsh shutdown` followed by
+`virsh start`. A vCPU or RAM change reported as `applies after restart` behaves the same way.
+
+Hot-plug is best-effort by design. libvirt keeps only a small spare of hot-pluggable PCIe ports, so
+attaching several disks to one running guest typically places the first and reports the rest as
+`applies after power cycle`, with `No more available PCI slots` in the `-v` log. Nothing is lost —
+the volumes exist and the disks are in the config — and the next start brings them in.
+
+A volume that already exists under the expected name is **reused, never replaced**: recreating a VM
+with the same name gives it its old data disk back, reported as `reused existing volume`. A volume
+that is already attached to a *different* domain is the one disk condition that blocks the run
+outright, because two domains sharing one qcow2 corrupt it as soon as both are running.
+
+At most 24 extra disks per VM, and each `name` must be 1-20 characters of `a-z`, `0-9` and `-`,
+unique within the VM. Twenty is where the `by-id` link truncates for virtio.
 
 ### Templates
 
@@ -174,6 +239,11 @@ source, network, metadata and NoCloud serial in the XML; `instance-id` and `loca
 The shipped `templates/user-data.yml` and `templates/network-config.yml` are working defaults with
 placeholder credentials — add your own SSH public keys to `user-data.yml` before the first run. The
 matching `*.example.yml` files carry the annotated reference.
+
+An extra disk is a copy of the domain template's first `<disk device='disk'>` with its own source,
+target and serial, so the `bus`, `discard`, `cache` and `io` settings you give the root disk apply
+to every data disk as well. `<boot>`, `<address>` and `<backingStore>` are not copied.
+`volTmpl` describes the extra volumes too; they are simply created empty instead of cloned.
 
 `templates/server.xml` and `templates/volume.xml` are reference definitions meant to run unchanged
 on any libvirt/KVM host: nothing host-specific is hardcoded — no emulator path, no pinned machine
@@ -192,9 +262,11 @@ listed with a `·` marker and does not stop the run.
 --- Plan ---------------------------------------------
 [ hv01.example.lan ]  delete: 1, update: 1, create: 1
   - old-test.example.lan
-      /var/lib/libvirt/images/old-test.example.lan
-  ~ cache-01  (cpu 2->4)
+      /var/lib/libvirt/images/old-test.example.lan.qcow2
+      /var/lib/libvirt/images/old-test.example.lan-data.qcow2
+  ~ cache-01  (cpu 2->4, attach 'data' 40G as vdb)
   + web-01
+      web-01-data.qcow2 40G in pool 'default'
 
 [ hv02.example.lan ]  no changes
 
@@ -203,8 +275,22 @@ Applying in 10s — Ctrl+C to abort...
 --- Applied -------------------------------------------
 [ hv01.example.lan ]  delete: 1, update: 1, create: 1, skipped: 0
   - old-test.example.lan
-  ~ cache-01  (cpu 2->4, applies after restart)
+  ~ cache-01  (cpu 2->4, attach 'data' 40G as vdb, applies after restart)
+      vdb data in pool 'default'
   + web-01
+      data 40G in pool 'default'
+```
+
+Disk facts Mnemosyne will not act on are printed as `note` lines under the VM they belong to. A VM
+that has nothing but notes is counted separately, so `note: 1` never reads as a change that was
+applied:
+
+```
+--- Plan ---------------------------------------------
+[ hv01.example.lan ]  note: 1
+  i db-01
+      disk 'data' is 40G on the host, 50G in the inventory - left as is
+      disk 'vdc' (db-01-scratch.qcow2) is not in the inventory - left as is
 ```
 
 A prerequisite the host does not have turns a `create` entry into a `blocked` one and stops the run

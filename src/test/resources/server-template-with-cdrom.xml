@@ -1,0 +1,46 @@
+<!--
+  Stand-in for a customised templates/server.xml: the root disk is on a scsi bus, it carries
+  driver tuning and a <boot order>, and a cdrom already occupies sdb. Extra disks must inherit
+  the tuning, must NOT inherit the boot order or the address, and must skip the cdrom's name.
+-->
+<domain type='kvm'>
+  <name></name>
+
+  <metadata>
+    <mnem:mnemosyne xmlns:mnem='https://mnemosyne.dev/schema/v1'>
+      <mnem:managedBy>mnemosyne</mnem:managedBy>
+      <mnem:serverId></mnem:serverId>
+      <mnem:specVersion>1</mnem:specVersion>
+    </mnem:mnemosyne>
+  </metadata>
+
+  <memory unit='KiB'></memory>
+  <vcpu></vcpu>
+
+  <sysinfo type='smbios'>
+    <system>
+      <entry name='serial'></entry>
+    </system>
+  </sysinfo>
+
+  <devices>
+    <disk type='file' device='disk'>
+      <driver name='qemu' type='qcow2' discard='unmap' cache='none' io='native'/>
+      <source file=''/>
+      <target dev='sda' bus='scsi'/>
+      <boot order='1'/>
+      <serial>root</serial>
+      <address type='drive' controller='0' bus='0' target='0' unit='0'/>
+    </disk>
+    <disk type='file' device='cdrom'>
+      <driver name='qemu' type='raw'/>
+      <source file='/var/lib/libvirt/images/tools.iso'/>
+      <target dev='sdb' bus='scsi'/>
+      <readonly/>
+    </disk>
+    <interface type='network'>
+      <source network=''/>
+      <model type='virtio'/>
+    </interface>
+  </devices>
+</domain>

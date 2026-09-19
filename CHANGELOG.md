@@ -7,6 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- `extraDisks` gives a VM additional blank disks: a list of `name`, `size` and an optional
+  `pool` that defaults to the VM's own. They are created as sparse qcow2 volumes named
+  `<vm>-<disk>.qcow2` and attached after the root disk, and they reach the guest raw —
+  partitioning and filesystems stay with the administrator. Each disk's name is written into
+  the domain's `<serial>`, so the guest gets a stable `/dev/disk/by-id/virtio-<name>` that
+  does not move when the target letters shift. Target names continue from the domain
+  template's own disks, so a template with a cdrom or a second disk cannot collide.
+  An extra disk is a copy of the template's root `<disk>`, minus `<boot>`, `<address>` and
+  `<backingStore>`, so the bus and the `discard`/`cache`/`io` tuning are stated once.
+- An existing disk is recognised by its `<serial>` first and by its volume file name only as a
+  fallback, so renaming a VM through `name:` does not make its data disks look missing and earn it
+  a second, empty set of them beside the originals.
+- Disks are reconciled on every run, add-only: one the inventory lists and the domain lacks is
+  created and attached, to an existing VM as well as to a new one. On a running guest it is
+  hot-plugged; when the hypervisor or guest cannot — most often because libvirt has no spare
+  hot-pluggable PCIe port left — it is written to the persistent config anyway and reported as
+  `applies after power cycle`, so the run still converges on the domain's next start. A reboot
+  from inside the guest is not enough: it keeps the same QEMU process and the same devices.
+  Nothing is ever detached, resized or deleted while the VM exists: a disk missing from the
+  inventory, a size that no longer matches and a changed `pool` are all reported as `note`
+  lines and left alone. A volume that already exists under the expected name is reused rather
+  than replaced, reported as `reused existing volume`. Deleting the VM still deletes all of
+  its volumes, and the plan names every one of them first.
+- Preflight refuses a volume that is already attached to another domain, comparing full paths so
+  two pools holding a same-named volume are not confused, and refuses two servers of one group
+  that would create the same volume. Two domains backed by one qcow2 corrupt it before anything
+  reports an error, so this blocks the run instead of being reported as a note. The checks now
+  cover the pools of updates that add a disk, not only creations.
 - Every run now checks what the planned creations need from the host before applying anything:
   the storage pool, the base image `volLookup` inside it, the libvirt network, and the readability
   of the template files. Problems are printed under `Preflight` and block the entire run — including
