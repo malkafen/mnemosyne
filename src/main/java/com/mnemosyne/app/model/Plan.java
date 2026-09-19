@@ -114,6 +114,9 @@ public final class Plan {
    * whatever is on it, and a wrong guess cannot be undone — so it is reported instead. Silence here
    * would be the dangerous option: the operator would first learn about such a disk from the list
    * of volumes a {@code delete} is about to remove.
+   *
+   * <p>Derived from the {@link Update} entries rather than collected alongside them, so the two
+   * cannot end up telling different stories about the same server.
    */
   private final Map<String, List<String>> notes;
 
@@ -134,17 +137,29 @@ public final class Plan {
             .collect(
                 Collectors.toMap(e -> e.getKey(), e -> e.getValue(), (a, b) -> a, TreeMap::new));
 
-    this.notes = new TreeMap<>();
+    // Every managed domain the inventory knows, diffed once. Both maps below are derived from
+    // this list rather than filled in as it is built: update() stays a pure function, so nothing
+    // here depends on the pipeline running sequentially, in order, or exactly once per element.
+    List<Update> matched =
+        managedD.values().stream()
+            .filter(d -> servers.containsKey(d.serverId()))
+            .map(d -> update(servers.get(d.serverId()), d))
+            .toList();
 
-    // A loop, not a stream: update() records the notes of every matched domain as it goes, and a
-    // side effect inside a stream pipeline is the kind of thing that breaks quietly later.
-    this.toUpdate = new TreeMap<>();
-    for (DomainState d : managedD.values()) {
-      Server s = servers.get(d.serverId());
-      if (s == null) continue;
-      Update u = update(s, d);
-      if (u.actionable()) this.toUpdate.put(d.serverId(), u);
-    }
+    // Notes are kept for every matched domain, including the ones with no work to do, which is
+    // why they are collected before `actionable` filters anything out.
+    this.notes =
+        matched.stream()
+            .filter(u -> !u.notes().isEmpty())
+            .collect(
+                Collectors.toMap(
+                    u -> u.server().getId(), Update::notes, (a, b) -> a, TreeMap::new));
+
+    this.toUpdate =
+        matched.stream()
+            .filter(Update::actionable)
+            .collect(
+                Collectors.toMap(u -> u.actual().serverId(), u -> u, (a, b) -> a, TreeMap::new));
 
     this.toDelete =
         !deleteDisable
@@ -169,12 +184,15 @@ public final class Plan {
    * <p>Costs nothing beyond the state snapshot the plan is built from. A disk is "already there"
    * when the domain has it — not when a volume of that name exists in the pool, which is a
    * different question and belongs to preflight.
+   *
+   * <p>Pure, and it has to stay that way: the constructor maps it over every managed domain, and a
+   * plan that recorded anything on the side would start losing it the day that stream runs in
+   * parallel. Everything this finds travels back in the returned {@link Update}.
    */
-  private Update update(Server s, DomainState d) {
+  private static Update update(Server s, DomainState d) {
     List<String> notes = new ArrayList<>();
     List<DiskAttach> toAttach = diskAttachments(s, d, notes);
     notes.addAll(unknownDiskNotes(s, d));
-    if (!notes.isEmpty()) this.notes.put(s.getId(), List.copyOf(notes));
     return new Update(s, d, toAttach, List.copyOf(notes));
   }
 
