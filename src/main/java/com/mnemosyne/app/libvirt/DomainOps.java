@@ -4,6 +4,7 @@ import com.mnemosyne.app.model.DomainState;
 import com.mnemosyne.app.utils.XmlUtil;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.TimeUnit;
 import org.libvirt.Connect;
 import org.libvirt.Domain;
@@ -114,6 +115,63 @@ class DomainOps {
     } catch (LibvirtException e) {
       log.debug("Failed to shut down domain '{}'", name, e);
       throw e;
+    } finally {
+      freeDomainQuietly(d);
+    }
+  }
+
+  /**
+   * Attaches one disk to a domain that already exists, and says whether the guest can see it yet.
+   *
+   * <p>The persistent config is written first, in a call of its own. If the live attach then fails
+   * — no free PCIe slot, a QEMU too old to hot-plug a virtio disk, a guest that refuses the request
+   * — the disk is nonetheless in the domain's config and appears the next time the domain is
+   * started. The run converges either way, and the only difference the operator sees is a note
+   * saying so. {@code No more available PCI slots} is the usual reason: libvirt keeps only a small
+   * spare of hot-pluggable ports, so several disks at once rarely all fit.
+   *
+   * <p>"Started" means a power cycle of the domain. A reboot from inside the guest keeps the same
+   * QEMU process, and with it exactly the devices the domain was launched with.
+   *
+   * <p>The reverse order would be worse: a disk hot-plugged into a running guest and missing from
+   * the config disappears on the next reboot, after the guest has been told to use it.
+   */
+  boolean attachDisk(String name, String diskXml, boolean live) throws LibvirtException {
+    Domain d = connect.domainLookupByName(name);
+    try {
+      log.trace("Disk XML attached to domain '{}': {}", name, diskXml);
+      d.attachDeviceFlags(diskXml, Domain.DeviceModifyFlags.CONFIG);
+      log.debug("Domain '{}': disk added to the persistent config", name);
+
+      if (!live) return false;
+      try {
+        d.attachDeviceFlags(diskXml, Domain.DeviceModifyFlags.LIVE);
+        log.debug("Domain '{}': disk hot-plugged into the running guest", name);
+        return true;
+      } catch (LibvirtException e) {
+        // Not fatal, and deliberately not rethrown: the config already has the disk.
+        log.debug("Domain '{}': hot-plug failed, the disk applies after restart", name, e);
+        return false;
+      }
+    } catch (LibvirtException e) {
+      log.debug("Failed to attach a disk to domain '{}'", name, e);
+      throw e;
+    } finally {
+      freeDomainQuietly(d);
+    }
+  }
+
+  /**
+   * Target device names in use on a domain right now.
+   *
+   * <p>Read from the live definition, not the stored one: a disk somebody hot-plugged is in the
+   * former and not the latter, and handing out a name it already answers to would attach the new
+   * disk over it.
+   */
+  Set<String> usedDiskTargets(String name) throws LibvirtException {
+    Domain d = connect.domainLookupByName(name);
+    try {
+      return XmlUtil.usedDiskTargets(d.getXMLDesc(0));
     } finally {
       freeDomainQuietly(d);
     }

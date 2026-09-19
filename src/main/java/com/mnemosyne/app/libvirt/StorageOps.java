@@ -2,8 +2,10 @@ package com.mnemosyne.app.libvirt;
 
 import com.mnemosyne.app.exception.*;
 import com.mnemosyne.app.model.Preflight.Problem;
+import com.mnemosyne.app.utils.XmlUtil;
 import java.util.List;
 import java.util.Optional;
+import java.util.OptionalLong;
 import org.libvirt.Connect;
 import org.libvirt.Error;
 import org.libvirt.LibvirtException;
@@ -23,10 +25,82 @@ class StorageOps {
 
   record VolumeSpec(
       String volumeName, String poolName, String volXml, String cloneSource, long targetCapacity) {
-    private static final long GIB = 1024L * 1024 * 1024;
+    static final long GIB = 1024L * 1024 * 1024;
 
     VolumeSpec {
       targetCapacity = targetCapacity * GIB;
+    }
+
+    /**
+     * A volume with nothing to clone from. The volume XML already states the capacity, so a blank
+     * volume is created at its final size and needs no resize — and therefore has no resize to roll
+     * back.
+     */
+    static VolumeSpec blank(String volumeName, String poolName, String volXml) {
+      return new VolumeSpec(volumeName, poolName, volXml, null, 0);
+    }
+  }
+
+  /**
+   * A provisioned volume, and whether it was already in the pool.
+   *
+   * <p>The distinction only matters for reporting, and only for data disks: a reused root disk is a
+   * retried creation, but a reused data disk may be the previous life of a VM with the same name,
+   * and it arrives in the guest with its old contents. Mnemosyne keeps it — deleting a volume to
+   * make a clean one is the one mistake that cannot be undone — and says so.
+   */
+  record Provisioned(String path, boolean reused) {}
+
+  /** A pool that can be used, and the directory its file-backed volumes live in. */
+  record PoolCheck(Optional<Problem> problem, String targetPath) {
+    static PoolCheck broken(Problem problem) {
+      return new PoolCheck(Optional.of(problem), null);
+    }
+  }
+
+  /**
+   * Read-only check that a pool can hold a new volume: it exists and it is running. No base image
+   * is looked up, because a blank data disk is not cloned from one.
+   *
+   * <p>The pool's {@code <target><path>} comes back with it. Preflight needs it to tell whether a
+   * volume name it is about to use is already attached to another domain, and comparing full paths
+   * is what keeps two pools that happen to hold a same-named volume apart.
+   */
+  PoolCheck checkPool(String poolName) {
+    StoragePool pool;
+    try {
+      pool = connect.storagePoolLookupByName(poolName);
+    } catch (LibvirtException e) {
+      log.debug("Preflight: storage pool '{}' not found: {}", poolName, e.getMessage(), e);
+      return PoolCheck.broken(new Problem("pool '" + poolName + "'", "not found on the host"));
+    }
+    try {
+      if (pool.isActive() != 1) {
+        return PoolCheck.broken(
+            new Problem("pool '" + poolName + "'", "not running; start it with virsh pool-start"));
+      }
+      return new PoolCheck(Optional.empty(), poolTargetPath(pool, poolName));
+    } catch (LibvirtException e) {
+      log.debug("Preflight: checking pool '{}' failed: {}", poolName, e.getMessage(), e);
+      return PoolCheck.broken(new Problem("pool '" + poolName + "'", cause(e)));
+    } finally {
+      freePoolQuietly(pool);
+    }
+  }
+
+  /**
+   * The pool's target directory, or null when it has none or cannot be read. Null is not an error
+   * here: a pool without a local path (iscsi, rbd) simply cannot be checked for path collisions,
+   * and the checks that use it skip what they cannot see rather than guessing.
+   */
+  private String poolTargetPath(StoragePool pool, String poolName) {
+    try {
+      String path = XmlUtil.poolTargetPath(pool.getXMLDesc(0));
+      if (path == null) log.debug("Pool '{}' declares no <target><path>", poolName);
+      return path;
+    } catch (LibvirtException | RuntimeException e) {
+      log.debug("Could not read the target path of pool '{}': {}", poolName, e.getMessage(), e);
+      return null;
     }
   }
 
@@ -115,6 +189,54 @@ class StorageOps {
       return newVolume(pool, spec);
     } finally {
       freePoolQuietly(pool);
+    }
+  }
+
+  /**
+   * Creates one blank volume, or hands back the one that is already there.
+   *
+   * <p>Nothing is cloned and nothing is resized: the volume XML carries the capacity, so libvirt
+   * makes it the right size in one call. An existing volume of that name is reused rather than
+   * replaced — it is the only safe answer, since Mnemosyne cannot know whether it holds data
+   * somebody wants — and the caller reports which of the two happened.
+   */
+  Provisioned provisionBlankVolume(VolumeSpec spec) throws LibvirtException {
+    log.debug(
+        "Provisioning blank volume '{}' in storage pool '{}'", spec.volumeName(), spec.poolName());
+    StoragePool pool = lookupPool(spec.poolName());
+    StorageVol vol = null;
+    try {
+      Optional<String> existing = findExistingVolumePath(pool, spec.volumeName());
+      if (existing.isPresent()) {
+        log.debug("Volume '{}' already exists, reusing it as is", spec.volumeName());
+        return new Provisioned(existing.get(), true);
+      }
+      log.trace("Volume XML for '{}':\n{}", spec.volumeName(), spec.volXml());
+      vol = pool.storageVolCreateXML(spec.volXml(), 0);
+      return new Provisioned(vol.getPath(), false);
+    } finally {
+      if (vol != null) freeVolumeQuietly(vol);
+      freePoolQuietly(pool);
+    }
+  }
+
+  /**
+   * The virtual size of an existing volume, in whole GiB, or empty when it cannot be read.
+   *
+   * <p>Only used to report a size that no longer matches the inventory. A missing answer therefore
+   * costs nothing but the note, which is why a failure is logged and swallowed instead of failing
+   * the run.
+   */
+  OptionalLong capacityGiB(String path) {
+    StorageVol vol = null;
+    try {
+      vol = connect.storageVolLookupByPath(path);
+      return OptionalLong.of(vol.getInfo().capacity / VolumeSpec.GIB);
+    } catch (LibvirtException e) {
+      log.debug("Could not read the capacity of volume '{}': {}", path, e.getMessage(), e);
+      return OptionalLong.empty();
+    } finally {
+      if (vol != null) freeVolumeQuietly(vol);
     }
   }
 

@@ -20,6 +20,12 @@ public final class TestData {
   public static final List<String> DISKPATHS =
       List.of("/var/lib/libvirt/images/toDelete-vm", "/var/lib/libvirt/images/test-data");
 
+  /** The same disks as {@link #DISKPATHS}, as a domain reports them. */
+  public static final List<DomainState.Disk> DISKS =
+      List.of(
+          new DomainState.Disk("vda", DISKPATHS.get(0), null),
+          new DomainState.Disk("vdb", DISKPATHS.get(1), null));
+
   private static Server ServerFactory(String name) {
     Server s = new Server();
     s.setId(name);
@@ -63,7 +69,7 @@ public final class TestData {
                 "toDelete-id",
                 "1",
                 "mnemosyne",
-                DISKPATHS,
+                DISKS,
                 true,
                 false),
             new DomainState(

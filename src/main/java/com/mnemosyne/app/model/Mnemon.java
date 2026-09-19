@@ -87,6 +87,12 @@ public class Mnemon {
 
                 if (s.getVolLookup() == null) s.setVolLookup(m.getVolLookup());
                 if (s.getMetaUrl() == null) s.setMetaUrl(m.getMetaUrl());
+
+                // An extra disk without a pool of its own lives where the VM's root disk lives.
+                // Filled in here rather than read lazily, so validation and the plan see one value.
+                s.getExtraDisks().stream()
+                    .filter(d -> d.getPool() == null || d.getPool().isBlank())
+                    .forEach(d -> d.setPool(s.getPool()));
               });
     }
     return mnemones;

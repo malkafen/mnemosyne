@@ -50,6 +50,32 @@
                                      # Omit the key to leave the domain's own setting alone.
       # volLookup / metaUrl / templates are inherited from the group above.
 
+      # --- Additional disks (optional) ---------------------------------------
+      # Blank qcow2 volumes attached after the root disk, in the order listed here.
+      # They arrive in the guest RAW: partitioning, filesystems and /etc/fstab are the
+      # administrator's job. Mnemosyne creates them and never writes to them again.
+      #
+      # `name`  1-20 characters of a-z, 0-9 and '-', unique within the VM. It becomes the
+      #         volume file name (`web-01.example.lan-data.qcow2`) AND the disk's serial,
+      #         so the guest gets /dev/disk/by-id/virtio-data. PARTITION THAT PATH, not
+      #         /dev/vdb: the letters follow the order of this list and would shift if a
+      #         disk were ever inserted above.
+      # `size`  GiB, at least 1. No base image has to fit in it, so there is no 10 GiB floor.
+      # `pool`  optional; defaults to the VM's own `pool` above.
+      #
+      # Disks are ADD-ONLY. A new entry here is created and attached on the next run — to a
+      # VM that already exists too, hot-plugged if the guest allows it and applied on the
+      # next boot otherwise. Removing an entry does NOT delete anything: the disk stays
+      # attached and is reported as "not in the inventory". Changing `size` does nothing
+      # yet and is reported as a mismatch. Deleting the VM itself DOES delete these
+      # volumes, along with the root disk; the plan names every one of them first.
+      extraDisks:
+        - name: data                 # -> /dev/disk/by-id/virtio-data in the guest
+          size: 40                   # GiB
+        - name: logs
+          size: 50
+          pool: "fast-ssd"           # this disk lives in another pool than the VM's root
+
     # --- VM #2: a cache node (relies on field defaults where possible) ---
     # `name` set explicitly → the key stays the stable id, the domain can be
     # renamed later by editing `name` without recreating the VM.

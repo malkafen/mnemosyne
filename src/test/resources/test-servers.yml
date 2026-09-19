@@ -18,6 +18,13 @@
       pool: "default"
       launch: true
       network: "host-bridge"
+      # 'data' inherits pool: default from the server; 'logs' overrides it.
+      extraDisks:
+        - name: data
+          size: 40
+        - name: logs
+          size: 50
+          pool: "fast-ssd"
 
     "core-db-test-b.example.lan":
       cpu: "4"

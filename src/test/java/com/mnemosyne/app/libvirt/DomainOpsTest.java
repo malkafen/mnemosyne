@@ -309,7 +309,11 @@ public class DomainOpsTest {
 
       assertThat(actual.get(0).name()).isEqualTo("test-vm.example.net");
       assertThat(actual.get(0).managed()).isTrue();
-      assertThat(actual.get(0).disks()).containsExactly("/var/lib/libvirt/images/test-vm.qcow2");
+      assertThat(actual.get(0).diskPaths())
+          .containsExactly("/var/lib/libvirt/images/test-vm.qcow2");
+      assertThat(actual.get(0).disks())
+          .containsExactly(
+              new DomainState.Disk("vda", "/var/lib/libvirt/images/test-vm.qcow2", null));
       verify(domains[0]).free();
     }
 

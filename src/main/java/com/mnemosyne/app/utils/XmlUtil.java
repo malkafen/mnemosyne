@@ -2,11 +2,14 @@ package com.mnemosyne.app.utils;
 
 import com.mnemosyne.app.exception.*;
 import com.mnemosyne.app.model.DomainState;
+import com.mnemosyne.app.model.DomainState.Disk;
 import java.io.IOException;
 import java.io.StringReader;
 import java.io.StringWriter;
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Set;
 import javax.xml.XMLConstants;
 import javax.xml.parsers.DocumentBuilder;
 import javax.xml.parsers.DocumentBuilderFactory;
@@ -83,7 +86,7 @@ public class XmlUtil {
 
       Element meta = firstNS(doc, MNEM_NS, "mnemosyne");
       if (meta == null) {
-        return new DomainState(name, cpu, ram, null, null, null, diskPaths(doc), false, false);
+        return new DomainState(name, cpu, ram, null, null, null, disks(doc), false, false);
       }
 
       return new DomainState(
@@ -94,7 +97,7 @@ public class XmlUtil {
           // textNS(meta, MNEM_NS, "specHash"),
           textNS(meta, MNEM_NS, "specVersion"),
           textNS(meta, MNEM_NS, "managedBy"),
-          diskPaths(doc),
+          disks(doc),
           false,
           false);
     } catch (ParserConfigurationException | SAXException | IOException e) {
@@ -149,6 +152,38 @@ public class XmlUtil {
     }
   }
 
+  /**
+   * One element on its own, without the XML declaration: the shape libvirt's {@code
+   * attachDeviceFlags} expects for a single device.
+   */
+  public static String serializeFragment(Element element, String what) {
+    try {
+      Transformer transformer = TransformerFactory.newInstance().newTransformer();
+      transformer.setOutputProperty(OutputKeys.OMIT_XML_DECLARATION, "yes");
+      transformer.setOutputProperty(OutputKeys.INDENT, "yes");
+      StringWriter writer = new StringWriter();
+      transformer.transform(new DOMSource(element), new StreamResult(writer));
+      return writer.toString();
+    } catch (TransformerException e) {
+      throw new XmlParseException("Failed to serialize XML for '" + what + "'", e);
+    }
+  }
+
+  /**
+   * The {@code <target><path>} of a storage pool, or null for a pool that has none — every pool
+   * type that is not backed by a local directory, which cannot be reasoned about by file path.
+   */
+  public static String poolTargetPath(String poolXml) {
+    try {
+      Document doc = parse(poolXml);
+      NodeList targets = doc.getElementsByTagName("target");
+      if (targets.getLength() == 0) return null;
+      return childText((Element) targets.item(0), "path");
+    } catch (ParserConfigurationException | SAXException | IOException e) {
+      throw new XmlParseException("Failed to parse storage pool XML", e);
+    }
+  }
+
   public static List<String> diskPaths(String domainXml) {
     try {
       Document doc = parse(domainXml);
@@ -158,8 +193,15 @@ public class XmlUtil {
     }
   }
 
-  private static List<String> diskPaths(Document doc) {
-    List<String> paths = new ArrayList<>();
+  /**
+   * Every file-backed {@code <disk device='disk'>} of a domain, in document order.
+   *
+   * <p>A cdrom is skipped: it is not a disk Mnemosyne owns, and it must not consume a target letter
+   * reserved for one. A network-backed disk (rbd, iscsi) has no {@code @file} and is skipped too —
+   * it is still reported as a target in use, which is what keeps a hand-built domain safe.
+   */
+  public static List<Disk> disks(Document doc) {
+    List<Disk> found = new ArrayList<>();
     NodeList disks = doc.getElementsByTagName("disk");
     for (int i = 0; i < disks.getLength(); i++) {
       Element disk = (Element) disks.item(i);
@@ -171,10 +213,55 @@ public class XmlUtil {
         continue;
       }
       String file = source.getAttribute("file");
-      if (!file.isBlank()) {
-        paths.add(file);
+      if (file.isBlank()) {
+        continue;
       }
+      found.add(new Disk(targetDev(disk), file, childText(disk, "serial")));
     }
-    return paths;
+    return found;
+  }
+
+  /**
+   * Target device names of every {@code <disk>} in the document, cdroms and network-backed disks
+   * included. Attaching a disk means picking a name nothing else answers to, so this deliberately
+   * looks wider than {@link #disks(Document)}.
+   */
+  public static Set<String> usedDiskTargets(String domainXml) {
+    try {
+      return usedDiskTargets(parse(domainXml));
+    } catch (ParserConfigurationException | SAXException | IOException e) {
+      throw new XmlParseException("Failed to parse domain XML", e);
+    }
+  }
+
+  /** As {@link #usedDiskTargets(String)}, for a document already in hand. */
+  public static Set<String> usedDiskTargets(Document doc) {
+    Set<String> used = new LinkedHashSet<>();
+    NodeList disks = doc.getElementsByTagName("disk");
+    for (int i = 0; i < disks.getLength(); i++) {
+      String dev = targetDev((Element) disks.item(i));
+      if (dev != null) used.add(dev);
+    }
+    return used;
+  }
+
+  /** {@code <target dev='...'/>} of one disk element, or null when the template leaves it out. */
+  private static String targetDev(Element disk) {
+    Element target = (Element) disk.getElementsByTagName("target").item(0);
+    if (target == null) return null;
+    return clean(target.getAttribute("dev"));
+  }
+
+  /**
+   * Text of a child element, scoped to {@code parent}. Scoping matters for {@code <serial>}: a
+   * document-wide lookup would find the {@code <serial type='pty'>} console device instead.
+   */
+  private static String childText(Element parent, String tag) {
+    NodeList nodes = parent.getElementsByTagName(tag);
+    return nodes.getLength() == 0 ? null : clean(nodes.item(0).getTextContent());
+  }
+
+  private static List<String> diskPaths(Document doc) {
+    return disks(doc).stream().map(Disk::path).toList();
   }
 }

@@ -12,3 +12,6 @@ dependency-reduced-pom.xml
 configs/servers.yml
 configs/servers_prod.yml
 configs/servers_dev.yml
+
+
+!**/*Dev*.java
