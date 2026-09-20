@@ -35,6 +35,11 @@ public final class Report {
     lines.add(line(SKIP_MARKER, name, reason));
   }
 
+  /** How many entries this block gave up on; what the run's exit code is built from. */
+  public int skipped() {
+    return skipped;
+  }
+
   public void print(String group) {
     print(group, null);
   }

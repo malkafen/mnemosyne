@@ -14,6 +14,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.StringJoiner;
 import java.util.stream.Collectors;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -26,6 +27,18 @@ class Mnemosyne {
 
   private static final Logger log = LoggerFactory.getLogger(Mnemosyne.class);
   private static final long CONFIRM_DELAY_MS = 10000L;
+
+  /** Everything went as planned. */
+  private static final int EXIT_OK = 0;
+
+  /**
+   * The run finished, but not everything in it did: a VM was skipped, or a guest never came back
+   * over cloud-init. Both leave the host short of the inventory, and both used to end in exit 0 —
+   * which made a run where no guest was configured at all indistinguishable, to anything automated,
+   * from a clean one. It shares the code of a fatal error on purpose: for a caller there are two
+   * answers, "the inventory is now on the host" and "it is not".
+   */
+  private static final int EXIT_INCOMPLETE = 1;
 
   private Validator validator;
   private List<Mnemon> mnemones;
@@ -58,7 +71,8 @@ class Mnemosyne {
     if (config.isVerbose()) enableDebugLogging();
 
     try {
-      new Mnemosyne().run(config);
+      int exitCode = new Mnemosyne().run(config);
+      if (exitCode != EXIT_OK) System.exit(exitCode);
     } catch (Exception e) {
       Throwable root = getRootCause(e);
       // A failure raised by Mnemosyne itself is its own root cause; repeating it reads as noise.
@@ -69,7 +83,7 @@ class Mnemosyne {
     }
   }
 
-  public void run(Config config) throws Exception {
+  public int run(Config config) throws Exception {
     initValidator();
     mnemones = loadAndValidate(config);
     try {
@@ -89,7 +103,7 @@ class Mnemosyne {
       }
       if (!blocked.isEmpty()) stop(blocked.size());
 
-      if (config.isPlanOnly()) return;
+      if (config.isPlanOnly()) return EXIT_OK;
       CloudInitServer.start();
       confirmWindow();
 
@@ -99,17 +113,52 @@ class Mnemosyne {
         else i.harmonia().reconcile();
       }
       log.info("All {} mnemones provisioned. Waiting cloud-init is done...", mnemones.size());
-      if (!CloudInitServer.waitForCloudInit().get()) {
+      boolean cloudInitOk = CloudInitServer.waitForCloudInit().get();
+      if (!cloudInitOk) {
         log.error("cloud-init did not finish on all servers — see warnings above");
       }
 
+      // Settling happens whatever cloud-init did - a launch:false VM must not be left running
+      // against the inventory - and its own failures count towards the exit code below.
       if (irides.stream().anyMatch(i -> i.harmonia().hasPendingStop())) {
         Report.heading("Settled");
         for (Iris i : irides) i.harmonia().settle();
       }
+      return outcome(cloudInitOk);
     } finally {
       shutdown();
     }
+  }
+
+  /**
+   * The run's verdict, printed and returned as the exit code.
+   *
+   * <p>Per-VM failures do not stop a run — that is the contract, and it is the right one — but the
+   * operator's terminal is not the only thing reading the result. A scheduler, a CI job or the next
+   * step of a pipeline has nothing but the exit code, and "three of five VMs were created and none
+   * of them was ever configured" has to reach it. So the skipped entries of every group and the
+   * guests that never phoned home are summed up here, once, after everything else has had its say.
+   *
+   * <p>The line names both numbers, because they are different failures with different fixes: a
+   * skipped entry was refused by the host and is in the report above with its reason, while a guest
+   * that did not phone home exists, runs, and is simply not configured.
+   */
+  private int outcome(boolean cloudInitOk) {
+    int skipped = irides.stream().mapToInt(i -> i.harmonia().failures()).sum();
+    List<String> pending = CloudInitServer.unfinished();
+    if (skipped == 0 && cloudInitOk && pending.isEmpty()) return EXIT_OK;
+
+    StringJoiner why = new StringJoiner(", ");
+    if (skipped > 0) why.add(skipped + " entr" + (skipped == 1 ? "y" : "ies") + " skipped");
+    if (!pending.isEmpty())
+      why.add(
+          String.format(
+              "cloud-init did not finish on %d server(s): %s",
+              pending.size(), String.join(", ", pending)));
+    else if (!cloudInitOk) why.add("the wait for cloud-init did not complete");
+
+    System.out.printf("%nRun finished incomplete: %s.%n", why);
+    return EXIT_INCOMPLETE;
   }
 
   /**

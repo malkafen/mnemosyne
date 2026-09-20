@@ -22,6 +22,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the new end, so it is never done, and an inventory that quietly disagreed with the host was the
   more dangerous of the two options.
 
+### Fixed
+- A run that finished with something undone now exits non-zero. A per-VM failure and a guest that
+  never reported back over `phone_home` both still let the rest of the run finish, but both leave
+  the host short of the inventory, and both used to end in exit `0` — a run in which no guest was
+  configured at all was indistinguishable, to a scheduler or a CI job, from a clean one. The
+  skipped entries of every group and the servers still missing from cloud-init are summed up after
+  the last block and printed as `Run finished incomplete: ...`, naming both numbers because they
+  need different fixes. A blocked plan and a fatal error keep their exit `1`; `--plan` and a clean
+  run keep their `0`.
+- A VM shut down under `Settled` is no longer called `initialized` when its cloud-init never
+  finished. It is still shut down — a `launch: false` VM must not be left running against the
+  inventory — but it is reported as `cloud-init did not finish`, in the one case where the
+  difference is what the operator needs to see.
+
 ### Changed
 - Disk capacities are read into the state snapshot before the plan is built, so size drift is
   decided in `Plan` alongside vCPU, RAM, power and autostart rather than in a second pass beside
