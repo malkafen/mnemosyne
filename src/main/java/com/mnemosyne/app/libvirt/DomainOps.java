@@ -21,6 +21,11 @@ class DomainOps {
 
   private static final long SHUTDOWN_POLL_MS = 2000L;
 
+  private static final long BYTES_PER_GIB = 1024L * 1024 * 1024;
+
+  /** {@code VIR_DOMAIN_BLOCK_RESIZE_BYTES}: libvirt-java exposes no constant for it. */
+  private static final int VIR_DOMAIN_BLOCK_RESIZE_BYTES = 1;
+
   private final Connect connect;
 
   public DomainOps(Connect connect) {
@@ -172,6 +177,33 @@ class DomainOps {
     Domain d = connect.domainLookupByName(name);
     try {
       return XmlUtil.usedDiskTargets(d.getXMLDesc(0));
+    } finally {
+      freeDomainQuietly(d);
+    }
+  }
+
+  /**
+   * Grows one disk of a running domain, through QEMU.
+   *
+   * <p>This is the whole point of doing it live: QEMU resizes the image and raises a
+   * capacity-change event on the virtio device, so the guest kernel sees the new size straight away
+   * and the disk does not have to wait for a power cycle. Nothing is written to the domain XML,
+   * which does not record a disk's size in the first place.
+   *
+   * <p>The size is passed in bytes, which libvirt only accepts with {@code
+   * VIR_DOMAIN_BLOCK_RESIZE_BYTES}. Without that flag the argument is read as KiB — the same number
+   * would grow the disk 1024-fold — and libvirt-java hands both straight to the C API without
+   * touching either, so the flag is not optional.
+   */
+  void blockResize(String name, String target, long targetGiB) throws LibvirtException {
+    Domain d = connect.domainLookupByName(name);
+    try {
+      long bytes = targetGiB * BYTES_PER_GIB;
+      log.debug("Domain '{}': resizing '{}' to {} bytes ({} GiB)", name, target, bytes, targetGiB);
+      d.blockResize(target, bytes, VIR_DOMAIN_BLOCK_RESIZE_BYTES);
+    } catch (LibvirtException e) {
+      log.debug("Domain '{}': failed to resize '{}' to {} GiB", name, target, targetGiB, e);
+      throw e;
     } finally {
       freeDomainQuietly(d);
     }

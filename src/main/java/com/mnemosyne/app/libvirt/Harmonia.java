@@ -6,7 +6,6 @@ import com.mnemosyne.app.libvirt.DomainOps.DomainSpec;
 import com.mnemosyne.app.libvirt.StorageOps.PoolCheck;
 import com.mnemosyne.app.libvirt.StorageOps.Provisioned;
 import com.mnemosyne.app.libvirt.StorageOps.VolumeSpec;
-import com.mnemosyne.app.model.DiskAudit;
 import com.mnemosyne.app.model.DomainState;
 import com.mnemosyne.app.model.ExtraDisk;
 import com.mnemosyne.app.model.Plan;
@@ -21,7 +20,6 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
-import java.util.Optional;
 import java.util.OptionalLong;
 import java.util.Set;
 import org.libvirt.Connect;
@@ -51,11 +49,15 @@ public class Harmonia implements AutoCloseable {
 
   public Harmonia(String group, String user, String key, String host, int port)
       throws LibvirtException, IOException {
-    Connect c = Hypervisor.connect(user, key, host, port);
-    this.domainOps = new DomainOps(c);
-    this.storageOps = new StorageOps(c);
-    this.networkOps = new NetworkOps(c);
-    this.connect = c;
+    this(group, Hypervisor.connect(user, key, host, port));
+  }
+
+  /** Everything this class does goes through one connection; opening it is the only other step. */
+  Harmonia(String group, Connect connect) {
+    this.domainOps = new DomainOps(connect);
+    this.storageOps = new StorageOps(connect);
+    this.networkOps = new NetworkOps(connect);
+    this.connect = connect;
     this.group = group;
   }
 
@@ -67,9 +69,40 @@ public class Harmonia implements AutoCloseable {
   }
 
   public Plan plan(Map<String, Server> servers, boolean deleteDisable) throws LibvirtException {
-    this.actual = domainOps.readActualState();
+    this.actual = withDiskCapacities(domainOps.readActualState());
     this.plan = new Plan(this.actual, servers, deleteDisable);
     return this.plan;
+  }
+
+  /**
+   * Fills in the size of every disk of every managed domain, before the plan is built.
+   *
+   * <p>A volume's capacity is the one disk fact the domain XML does not carry, and the plan needs
+   * it to tell a disk that matches the inventory from one that has to grow. It is attached to the
+   * snapshot here rather than looked up later so that {@link Plan} keeps deciding everything about
+   * a domain from one value, the way it does for vCPU, RAM, power and autostart — a second source
+   * of "what should change" is exactly what the plan's own comments warn against.
+   *
+   * <p>The price is one volume lookup per disk of a managed domain, per run. Unmanaged domains are
+   * skipped: they are never touched, so their sizes are nobody's business. A lookup that fails
+   * leaves the disk at {@link DomainState#CAPACITY_UNKNOWN}, and an unknown size is never acted on.
+   */
+  private List<DomainState> withDiskCapacities(List<DomainState> domains) {
+    List<DomainState> filled = new ArrayList<>(domains.size());
+    for (DomainState d : domains) {
+      if (!d.managed() || d.disks().isEmpty()) {
+        filled.add(d);
+        continue;
+      }
+      List<DomainState.Disk> disks = new ArrayList<>(d.disks().size());
+      for (DomainState.Disk disk : d.disks()) {
+        OptionalLong capacity =
+            disk.path() == null ? OptionalLong.empty() : storageOps.capacityGiB(disk.path());
+        disks.add(capacity.isPresent() ? disk.withCapacity(capacity.getAsLong()) : disk);
+      }
+      filled.add(d.withDisks(disks));
+    }
+    return List.copyOf(filled);
   }
 
   /**
@@ -90,6 +123,8 @@ public class Harmonia implements AutoCloseable {
       log.debug("[ {} ] nothing to check (no plan)", group);
       return preflight;
     }
+    refuseShrinks(preflight);
+
     List<Server> creating = List.copyOf(this.plan.getToCreate().values());
     List<Plan.Update> attaching =
         this.plan.getToUpdate().values().stream().filter(Plan.Update::disksChanged).toList();
@@ -154,37 +189,31 @@ public class Harmonia implements AutoCloseable {
   }
 
   /**
-   * Reads the size of the extra disks a managed VM already has, so the plan can say when one no
-   * longer matches the inventory.
+   * Turns every disk the inventory wants smaller into a preflight problem, which stops the run.
    *
-   * <p>A volume's capacity is not in the domain XML, so this is one lookup per disk that is already
-   * in place — spent only on servers that actually declare extra disks. Nothing here is ever acted
-   * on: a disk is never grown, and never, under any circumstances, shrunk.
+   * <p>It goes through preflight rather than through a mechanism of its own because preflight is
+   * already what halts a run, and because the operator then reads one list of reasons instead of
+   * two. It is added before preflight's early return: a group with nothing to create and no disk to
+   * attach still has to stop if one of its disks is over size.
+   *
+   * <p>Costs nothing over the wire. The sizes were read when the snapshot was taken, and the
+   * comparison was done by the plan.
    */
-  public DiskAudit diskAudit(Map<String, Server> servers) {
-    DiskAudit audit = new DiskAudit();
-    for (DomainState d : this.actual) {
-      Server s = d.managed() ? servers.get(d.serverId()) : null;
-      if (s == null || s.getExtraDisks().isEmpty()) continue;
-
-      for (ExtraDisk disk : s.getExtraDisks()) {
-        // Matched the same way the plan matches it, serial first, so a renamed VM is audited on
-        // the disks it actually has rather than on the names it would get today.
-        Optional<DomainState.Disk> attached = d.diskFor(disk, s.getName());
-        // Not attached yet; the plan reports it as an attach, and there is nothing to measure.
-        if (attached.isEmpty() || attached.get().path() == null) continue;
-
-        OptionalLong actualGiB = storageOps.capacityGiB(attached.get().path());
-        if (actualGiB.isEmpty() || actualGiB.getAsLong() == disk.getSize()) continue;
-
-        audit.add(
-            s.getId(),
-            String.format(
-                "disk '%s' is %dG on the host, %dG in the inventory - left as is",
-                disk.getName(), actualGiB.getAsLong(), disk.getSize()));
-      }
-    }
-    return audit;
+  private void refuseShrinks(Preflight preflight) {
+    this.plan
+        .getShrinks()
+        .forEach(
+            (id, disks) ->
+                disks.forEach(
+                    d ->
+                        preflight.add(
+                            new Preflight.Problem(
+                                d.label() + " of '" + id + "'",
+                                String.format(
+                                    "%dG on the host, %dG in the inventory; a disk is never shrunk"
+                                        + " - put %dG back in the inventory",
+                                    d.actualGiB(), d.wantedGiB(), d.actualGiB())),
+                            id)));
   }
 
   private static List<String> ids(List<Server> servers) {
@@ -249,8 +278,11 @@ public class Harmonia implements AutoCloseable {
       try {
         // Disks first, and always before the power state: a disk written into the persistent
         // config before a shutdown or a start is already there when the guest comes up, so the
-        // same run does not have to both add it and restart for it.
-        List<String> diskLines = attachDisks(u);
+        // same run does not have to both add it and restart for it. Growing comes after adding,
+        // for the same reason in reverse: a disk that was just created already has its final size,
+        // so there is never anything to grow among the ones this run added.
+        List<String> diskLines = new ArrayList<>(attachDisks(u));
+        diskLines.addAll(growDisks(u));
         if (u.cpuChanged()) domainOps.updateCpu(name, s.getCpu());
         if (u.ramChanged()) domainOps.updateRam(name, s.getRam());
         if (u.autostartChanged()) domainOps.updateAutostart(name, s.getAutostart());
@@ -319,6 +351,55 @@ public class Harmonia implements AutoCloseable {
       used.add(target);
       lines.add(diskLine(disk, target, volume, live && !hotPlugged));
     }
+    return lines;
+  }
+
+  /**
+   * Grows the disks the inventory wants bigger, and returns one line per disk for the report.
+   *
+   * <p>Which call does the work depends on the domain's power state, and the hypervisor does all of
+   * it either way. A running domain is resized through QEMU, which grows the image and raises a
+   * capacity-change event on the virtio device, so the guest has the new size immediately. A
+   * shut-down domain has no QEMU to ask, so its volume is resized in the storage pool and the guest
+   * finds the new size when it next boots.
+   *
+   * <p>There is no rollback, and there can be none: a qcow2 that has grown cannot be put back
+   * without risking whatever was written in the meantime. It costs nothing, because both calls set
+   * an absolute size rather than a delta — a run that died between the resize and its report leaves
+   * a disk the next run simply finds already correct.
+   *
+   * <p>What happens inside the guest is deliberately not attempted. The partition table and the
+   * filesystem on it belong to whoever administers that server, and a run that grew them would be
+   * guessing at a layout it has never seen.
+   */
+  private List<String> growDisks(Plan.Update u) throws LibvirtException {
+    if (!u.growChanged()) return List.of();
+
+    String name = u.actual().name();
+    boolean live = u.actual().active();
+
+    List<String> lines = new ArrayList<>();
+    for (Plan.DiskGrow g : u.toGrow()) {
+      if (live && g.target() != null) {
+        domainOps.blockResize(name, g.target(), g.toGiB());
+      } else if (!live && g.path() != null) {
+        storageOps.growVolume(g.path(), g.toGiB());
+      } else {
+        // A running disk with no target device name, or a stopped one with no file behind it.
+        // Neither can be addressed, and neither is worth guessing about.
+        lines.add(String.format("%s: no way to address this disk - not resized", g.label()));
+        continue;
+      }
+      lines.add(
+          String.format(
+              "%s grown %dG->%dG%s",
+              g.label(),
+              g.fromGiB(),
+              g.toGiB(),
+              live ? "" : " (the guest sees it at its next boot)"));
+    }
+    if (!lines.isEmpty())
+      lines.add("the guest's partition and filesystem are untouched - extend them yourself");
     return lines;
   }
 

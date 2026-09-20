@@ -240,6 +240,32 @@ class StorageOps {
     }
   }
 
+  /**
+   * Grows an existing volume to an absolute size, for a disk whose domain is shut down.
+   *
+   * <p>libvirt is told the final capacity in bytes rather than a delta, so a resize that is
+   * repeated — a retried run, a run that crashed after the resize and before the report — lands on
+   * the same number instead of adding to it. No allocation is requested: a sparse qcow2 grows in
+   * its own time, which is the behaviour a volume created by Mnemosyne already has.
+   *
+   * <p>The {@code SHRINK} flag is deliberately not passed, so libvirt itself refuses a size below
+   * the current one. The caller checks for that too; this is the backstop that does not depend on
+   * the caller being right.
+   */
+  void growVolume(String path, long targetGiB) throws LibvirtException {
+    StorageVol vol = connect.storageVolLookupByPath(path);
+    try {
+      long bytes = targetGiB * VolumeSpec.GIB;
+      log.debug("Resizing volume '{}' to {} bytes ({} GiB)", path, bytes, targetGiB);
+      vol.resize(bytes, 0);
+    } catch (LibvirtException e) {
+      log.debug("Failed to resize volume '{}' to {} GiB", path, targetGiB, e);
+      throw e;
+    } finally {
+      freeVolumeQuietly(vol);
+    }
+  }
+
   private StoragePool lookupPool(String name) throws LibvirtException {
     StoragePool pool;
     try {

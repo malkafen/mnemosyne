@@ -84,9 +84,7 @@ class Mnemosyne {
         Plan plan = i.harmonia.plan(i.mnemon().getServers(), config.isDeleteDisable());
         // Adoption creates nothing, so there is nothing to check and nothing to audit for it.
         Preflight preflight = config.isJoin() ? new Preflight() : i.harmonia.preflight();
-        DiskAudit audit =
-            config.isJoin() ? new DiskAudit() : i.harmonia.diskAudit(i.mnemon().getServers());
-        plan.print(i.mnemon.getGroup(), config.isJoin(), preflight, audit);
+        plan.print(i.mnemon.getGroup(), config.isJoin(), preflight);
         if (!preflight.ok()) blocked.put(i.mnemon.getGroup(), preflight);
       }
       if (!blocked.isEmpty()) stop(blocked.size());
@@ -117,13 +115,15 @@ class Mnemosyne {
   /**
    * Nothing is applied while any VM in the plan is blocked. Creation needs a storage pool, a base
    * image, a network and the templates; without one of them the batch would fail somewhere in the
-   * middle, leaving half the inventory provisioned and the rest reported as skipped. The reason is
-   * already printed against the VM, so what is left to say is that none of the plan was carried
-   * out.
+   * middle, leaving half the inventory provisioned and the rest reported as skipped. A disk the
+   * inventory wants smaller than it is blocks for a different reason — it is not a missing
+   * prerequisite but an instruction that must not be carried out — and stops the run the same way.
+   * The reason is already printed against the VM, so what is left to say is that none of the plan
+   * was carried out.
    */
   private void stop(int blockedGroups) {
     System.out.printf(
-        "Nothing was applied: %d of %d group(s) cannot be created as planned.%n",
+        "Nothing was applied: %d of %d group(s) cannot be applied as planned.%n",
         blockedGroups, irides.size());
     throw new IllegalStateException("preflight failed");
   }
