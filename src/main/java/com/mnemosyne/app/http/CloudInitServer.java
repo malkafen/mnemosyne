@@ -9,6 +9,7 @@ import java.io.OutputStream;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
@@ -60,6 +61,22 @@ public class CloudInitServer {
             t.setDaemon(true);
             return t;
           });
+
+  /**
+   * Whether this server's cloud-init reported back with {@code phone_home}.
+   *
+   * <p>Asked after the wait, by whoever has something to say about a single guest: a VM that never
+   * phoned home was booted and nothing more, and calling it initialized in the report is wrong in
+   * exactly the case the operator has to notice.
+   */
+  public static boolean initialized(String name) {
+    return done.contains(name);
+  }
+
+  /** The seeds still unaccounted for once the wait is over; empty when every guest reported. */
+  public static List<String> unfinished() {
+    return seeds.keySet().stream().filter(n -> !done.contains(n)).sorted().toList();
+  }
 
   public static Future<Boolean> waitForCloudInit() {
     return waiter.submit(CloudInitServer::pollCloudInit);

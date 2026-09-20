@@ -44,6 +44,13 @@ public class Harmonia implements AutoCloseable {
   /** VMs booted only so cloud-init could configure them; shut down in {@link #settle()}. */
   private final List<Server> toSettle = new ArrayList<>();
 
+  /**
+   * How many entries this group gave up on, across every block it printed. A per-VM failure keeps
+   * the run going, but it is still a failure, and {@code Mnemosyne} turns the total into the
+   * process' exit code so that a run nobody watched is not mistaken for a clean one.
+   */
+  private int failures;
+
   private static final Logger log = LoggerFactory.getLogger(Harmonia.class);
 
   public Harmonia(String group, String user, String key, String host, int port)
@@ -239,6 +246,7 @@ public class Harmonia implements AutoCloseable {
       }
     }
     report.print(group);
+    failures += report.skipped();
   }
 
   /**
@@ -269,6 +277,7 @@ public class Harmonia implements AutoCloseable {
       create(report);
     } finally {
       report.print(group);
+      failures += report.skipped();
     }
   }
 
@@ -517,19 +526,31 @@ public class Harmonia implements AutoCloseable {
   public void settle() {
     Report report = new Report();
     for (Server s : toSettle) {
+      // Read before the shutdown, because the answer is about the boot that is ending here.
+      boolean initialized = CloudInitServer.initialized(s.getName());
       try {
         domainOps.shutdownDomain(s.getName());
-        report.add("stop", "-", s.getId(), "initialized");
+        // The VM is stopped either way - it must not stay up against the inventory - but the
+        // word for it is not the same. A guest that never phoned home was booted and nothing
+        // more, and "initialized" would be a lie in the one case where it matters.
+        report.add(
+            "stop", "-", s.getId(), initialized ? "initialized" : "cloud-init did not finish");
       } catch (LibvirtException e) {
         log.debug("[ {} ] shutdown failed for '{}'", group, s.getId(), e);
         report.skip(s.getId(), "shutdown failed: " + cause(e));
       }
     }
     report.print(group);
+    failures += report.skipped();
   }
 
   public boolean hasPendingStop() {
     return !toSettle.isEmpty();
+  }
+
+  /** The entries this group reported as skipped, over the whole run. */
+  public int failures() {
+    return failures;
   }
 
   private static String cause(Throwable e) {

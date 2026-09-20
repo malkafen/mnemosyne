@@ -65,8 +65,12 @@ datasource served by a built-in HTTP server.
    Failures are per-VM: the entry is reported as skipped and the run continues.
 7. Mnemosyne waits for every new guest to report back over cloud-init's `phone_home`, polling every
    5 seconds up to 5 minutes. Guests created with `launch: false` are then shut down — reported
-   under `Settled` — and the connections and the HTTP server are closed. Starting an existing VM
-   needs no seed and is never awaited: every managed VM has already been through cloud-init.
+   under `Settled`, as `initialized` or `cloud-init did not finish` — and the connections and the
+   HTTP server are closed. Starting an existing VM needs no seed and is never awaited: every
+   managed VM has already been through cloud-init.
+8. The run ends with a closing line and an exit code. A skipped entry or a guest that never phoned
+   home leaves the host short of the inventory, so such a run exits non-zero even though
+   everything else was applied.
 
 Guests find their configuration through the SMBIOS serial `ds=nocloud;s=<metaUrl><name>/`, which
 points cloud-init at `meta-data`, `user-data`, `network-config` and `vendor-data` on Mnemosyne's
@@ -118,6 +122,12 @@ Debian/Ubuntu, `/usr/lib64` on RHEL/Fedora, `/opt/homebrew/lib` on macOS.
 | `--no-delete` | Keep managed domains that are absent from the inventory | off |
 | `-v`, `--verbose` | Debug logging, including full stack traces | off |
 | `-h`, `--help`, `-V`, `--version` | Usage and version | — |
+
+| Exit code | Meaning |
+| --- | --- |
+| `0` | The host matches the inventory: everything planned was applied and every new guest reported back |
+| `1` | Either nothing was applied (a blocked plan or a fatal error) or the run finished incomplete — an entry was skipped, or a guest never finished cloud-init |
+| `2` | Invalid command line |
 
 ### Docker
 
@@ -342,6 +352,17 @@ closing block of its own:
 --- Settled -------------------------------------------
 [ hv01.example.lan ]  stop: 1
   - standby-01  (initialized)
+```
+
+A guest that never reported back is shut down all the same — it must not stay up against the
+inventory — but it is not called initialized, and the run says so on its last line and exits `1`:
+
+```
+--- Settled -------------------------------------------
+[ hv01.example.lan ]  stop: 1
+  - standby-01  (cloud-init did not finish)
+
+Run finished incomplete: cloud-init did not finish on 1 server(s): standby-01.
 ```
 
 With `--join` the plan lists the unmanaged domains instead, marking the ones that can be adopted:
