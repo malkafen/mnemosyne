@@ -28,11 +28,35 @@ public final class Plan {
    */
   public record DiskAttach(ExtraDisk disk, String target) {}
 
+  /**
+   * One disk the inventory wants bigger than it is on the host.
+   *
+   * <p>Carries both addresses the reconciler might need, because which one it uses depends on the
+   * domain's power state: {@code target} for a running domain, whose disk QEMU resizes in place,
+   * and {@code path} for a shut-down one, whose volume is resized through the storage pool.
+   */
+  public record DiskGrow(String label, String target, String path, long fromGiB, long toGiB) {}
+
+  /**
+   * One disk the inventory wants smaller than it is on the host.
+   *
+   * <p>Never acted on, and not a note either: shrinking a disk throws away whatever lives past the
+   * new end, and no amount of care makes that recoverable. It stops the run instead, so the
+   * operator fixes the inventory rather than discovering later that the two disagree. Carried here
+   * rather than reported on the spot so that {@link Plan} stays a pure function.
+   */
+  public record DiskShrink(String label, long actualGiB, long wantedGiB) {}
+
   public record Update(
-      Server server, DomainState actual, List<DiskAttach> toAttach, List<String> notes) {
+      Server server,
+      DomainState actual,
+      List<DiskAttach> toAttach,
+      List<DiskGrow> toGrow,
+      List<DiskShrink> shrinks,
+      List<String> notes) {
 
     public Update(Server server, DomainState actual) {
-      this(server, actual, List.of(), List.of());
+      this(server, actual, List.of(), List.of(), List.of(), List.of());
     }
 
     public boolean cpuChanged() {
@@ -52,14 +76,29 @@ public final class Plan {
       return server.getAutostart() != null && server.getAutostart() != actual.autostart();
     }
 
-    /** Whether there is a disk to add. Disks are only ever added; none is removed or resized. */
+    /** Whether there is a disk to add. A disk is never removed. */
     public boolean disksChanged() {
       return !toAttach.isEmpty();
     }
 
-    /** Whether this entry is worth applying, as opposed to only worth mentioning. */
+    /** Whether a disk the domain already has must get bigger. */
+    public boolean growChanged() {
+      return !toGrow.isEmpty();
+    }
+
+    /**
+     * Whether this entry is worth applying, as opposed to only worth mentioning.
+     *
+     * <p>A shrink is deliberately absent: it is the one piece of drift that is never applied, and
+     * counting it here would put the server on the list of things to do.
+     */
     boolean actionable() {
-      return cpuChanged() || ramChanged() || autostartChanged() || powerChanged() || disksChanged();
+      return cpuChanged()
+          || ramChanged()
+          || autostartChanged()
+          || powerChanged()
+          || disksChanged()
+          || growChanged();
     }
 
     public String diff() {
@@ -75,6 +114,8 @@ public final class Plan {
         sb.append(
             String.format(
                 ", attach '%s' %dG as %s", a.disk().getName(), a.disk().getSize(), a.target()));
+      for (DiskGrow g : toGrow)
+        sb.append(String.format(", grow %s %dG->%dG", g.label(), g.fromGiB(), g.toGiB()));
       return sb.length() == 0 ? "" : sb.substring(2);
     }
 
@@ -120,6 +161,15 @@ public final class Plan {
    */
   private final Map<String, List<String>> notes;
 
+  /**
+   * Disks the inventory wants smaller than they are, keyed by server id.
+   *
+   * <p>Separate from {@link #notes} because it is not a note: the caller turns these into preflight
+   * problems, which stop the run. Separate from {@link #toUpdate} because there is nothing to apply
+   * — a server whose only drift is a shrink has no work to do and must not appear as if it had.
+   */
+  private final Map<String, List<DiskShrink>> shrinks;
+
   public Plan(List<DomainState> actual, Map<String, Server> servers, boolean deleteDisable) {
 
     HashMap<String, DomainState> managedD = new HashMap<>();
@@ -154,6 +204,13 @@ public final class Plan {
             .collect(
                 Collectors.toMap(
                     u -> u.server().getId(), Update::notes, (a, b) -> a, TreeMap::new));
+
+    this.shrinks =
+        matched.stream()
+            .filter(u -> !u.shrinks().isEmpty())
+            .collect(
+                Collectors.toMap(
+                    u -> u.server().getId(), Update::shrinks, (a, b) -> a, TreeMap::new));
 
     this.toUpdate =
         matched.stream()
@@ -192,8 +249,54 @@ public final class Plan {
   private static Update update(Server s, DomainState d) {
     List<String> notes = new ArrayList<>();
     List<DiskAttach> toAttach = diskAttachments(s, d, notes);
+    List<DiskGrow> toGrow = new ArrayList<>();
+    List<DiskShrink> shrinks = new ArrayList<>();
+    sizeDrift(s, d, toGrow, shrinks);
     notes.addAll(unknownDiskNotes(s, d));
-    return new Update(s, d, toAttach, List.copyOf(notes));
+    return new Update(
+        s, d, toAttach, List.copyOf(toGrow), List.copyOf(shrinks), List.copyOf(notes));
+  }
+
+  /**
+   * Compares the size of every disk the domain already has with the size the inventory asks for.
+   *
+   * <p>Only disks that are attached are looked at. One the inventory lists and the domain does not
+   * have is an attach, and it is created at the right size to begin with, so there is nothing here
+   * to compare it against.
+   *
+   * <p>The root disk is matched by position and the extra disks by serial, each the way the rest of
+   * the code already identifies them, so a renamed VM is measured against the disks it actually
+   * has.
+   */
+  private static void sizeDrift(
+      Server s, DomainState d, List<DiskGrow> grow, List<DiskShrink> shrink) {
+
+    d.rootDisk().ifPresent(root -> compareSize("root disk", root, s.getDisk(), grow, shrink));
+    for (ExtraDisk e : s.getExtraDisks())
+      d.diskFor(e, s.getName())
+          .ifPresent(
+              disk -> compareSize("disk '" + e.getName() + "'", disk, e.getSize(), grow, shrink));
+  }
+
+  /**
+   * One disk's size against one inventory figure.
+   *
+   * <p>A disk whose capacity could not be read is left alone entirely. Treating an unknown size as
+   * zero would make every such disk look undersized, and the run would "grow" disks whose real size
+   * nobody knows.
+   */
+  private static void compareSize(
+      String label,
+      DomainState.Disk disk,
+      long wantedGiB,
+      List<DiskGrow> grow,
+      List<DiskShrink> shrink) {
+
+    if (!disk.capacityKnown()) return;
+    long actual = disk.capacityGiB();
+    if (actual < wantedGiB)
+      grow.add(new DiskGrow(label, disk.target(), disk.path(), actual, wantedGiB));
+    else if (actual > wantedGiB) shrink.add(new DiskShrink(label, actual, wantedGiB));
   }
 
   private static List<DiskAttach> diskAttachments(Server s, DomainState d, List<String> notes) {
@@ -256,10 +359,12 @@ public final class Plan {
    * network or template is missing is listed as {@code blocked} instead of {@code create}, so the
    * plan shows what would actually happen and why it would not.
    *
-   * <p>{@code audit} carries the disk facts that cannot be read from the domain XML, so it arrives
-   * the same way: collected by the reconciler, merged into the entry it belongs to at print time.
+   * <p>An entry preflight refused is printed as {@code blocked} wherever it would otherwise have
+   * appeared — a creation, an update or a bare note — because the run will not carry it out, and a
+   * plan that still showed it as {@code update} would be describing something that is not going to
+   * happen.
    */
-  public void print(String group, boolean isJoin, Preflight preflight, DiskAudit audit) {
+  public void print(String group, boolean isJoin, Preflight preflight) {
     Report report = new Report();
 
     if (isJoin) {
@@ -276,8 +381,6 @@ public final class Plan {
       return;
     }
 
-    Map<String, List<String>> allNotes = mergedNotes(audit);
-
     toDelete.forEach(
         (n, disks) -> {
           report.add("delete", "-", n, disks.isEmpty() ? "no disks" : "");
@@ -285,43 +388,46 @@ public final class Plan {
         });
     toUpdate.forEach(
         (id, u) -> {
+          if (blocked(report, preflight, id)) return;
           report.add("update", "~", id, u.diff());
-          report.sub(allNotes.getOrDefault(id, List.of()));
+          report.sub(notes.getOrDefault(id, List.of()));
         });
     toCreate.forEach(
         (id, s) -> {
-          List<String> blockers = preflight.blockers(id);
-          if (blockers.isEmpty()) {
-            report.add("create", "+", id, s.isLaunch() ? "" : "off after init");
-            report.sub(createDiskLines(s));
-          } else report.add("blocked", "!", id, String.join("; ", blockers));
+          if (blocked(report, preflight, id)) return;
+          report.add("create", "+", id, s.isLaunch() ? "" : "off after init");
+          report.sub(createDiskLines(s));
         });
 
     // Servers with something to report but nothing to do. They are not a change, so they are
     // counted separately: an operator reading "update: 0, note: 1" knows nothing will be touched.
-    allNotes.forEach(
+    notes.forEach(
         (id, lines) -> {
           if (toUpdate.containsKey(id)) return;
+          if (blocked(report, preflight, id)) return;
           report.add("note", "i", id, "");
           report.sub(lines);
         });
 
+    // A server whose only finding is a disk that must not shrink has neither work nor a note, and
+    // would otherwise vanish from the plan that is about to stop because of it.
+    shrinks
+        .keySet()
+        .forEach(
+            id -> {
+              if (toUpdate.containsKey(id) || notes.containsKey(id)) return;
+              blocked(report, preflight, id);
+            });
+
     report.print(group, "no changes");
   }
 
-  /** Notes found while diffing, plus the ones the reconciler had to ask the host about. */
-  private Map<String, List<String>> mergedNotes(DiskAudit audit) {
-    Map<String, List<String>> merged = new TreeMap<>(notes);
-    if (audit == null) return merged;
-    audit
-        .getNotes()
-        .forEach(
-            (id, lines) -> {
-              List<String> all = new ArrayList<>(merged.getOrDefault(id, List.of()));
-              all.addAll(lines);
-              merged.put(id, List.copyOf(all));
-            });
-    return merged;
+  /** Prints an entry as blocked when preflight refused it, and reports whether it did. */
+  private static boolean blocked(Report report, Preflight preflight, String id) {
+    List<String> blockers = preflight.blockers(id);
+    if (blockers.isEmpty()) return false;
+    report.add("blocked", "!", id, String.join("; ", blockers));
+    return true;
   }
 
   /** The disks a new VM is getting, listed under its entry the way deleted volumes are. */

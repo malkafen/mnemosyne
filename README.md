@@ -17,7 +17,7 @@ datasource served by a built-in HTTP server.
 | `serverId` | The inventory map key. It is written into the domain's libvirt metadata and is the only identity Mnemosyne matches on, so a VM can be renamed without being recreated. |
 | managed / unmanaged | A domain is managed when it carries `managedBy: mnemosyne` metadata. Pre-existing domains are unmanaged and are never touched unless adopted with `--join`. |
 | Plan | The diff between the inventory (desired state) and the domains found on the host (current state), reported as `create`, `update` and `delete`, plus `note` lines for what is seen but deliberately left alone. Unmanaged domains are listed under `--join`, which is what adopting them needs. |
-| Extra disk | An additional blank disk of a VM, declared under `extraDisks`. Add-only: created and attached when it is missing, never detached, resized or deleted while the VM exists. |
+| Extra disk | An additional blank disk of a VM, declared under `extraDisks`. Created and attached when it is missing and grown when the inventory asks for more; never detached, shrunk or deleted while the VM exists. |
 
 ## How a run works
 
@@ -30,7 +30,8 @@ datasource served by a built-in HTTP server.
    `managedBy`, disk paths) and diffed against the inventory:
    - **create** — inventory entries with no managed domain and no name collision with an unmanaged one;
    - **update** — managed domains whose vCPU count, RAM, power state or autostart flag differs
-     from the inventory, or that are missing an extra disk the inventory lists;
+     from the inventory, that are missing an extra disk the inventory lists, or that have a disk
+     smaller than the inventory asks for;
    - **delete** — managed domains no longer listed in the inventory (suppressed by `--no-delete`);
    - **unmanaged** — everything else: never touched, and listed only under `--join`.
 4. Everything the planned **create** entries and disk attachments need is checked before the plan
@@ -49,7 +50,9 @@ datasource served by a built-in HTTP server.
    confirmation window (`Ctrl+C` aborts).
 6. Each group is reconciled in the order delete, update, create:
    - **delete** destroys and undefines the domain, then deletes its file-backed volumes;
-   - **update** adds any missing extra disks first, then changes vCPU count via libvirt and RAM by
+   - **update** adds any missing extra disks first and grows the ones that are too small — a
+     running domain through QEMU, so the guest sees the new size at once, a shut-down one through
+     its volume in the pool — then changes vCPU count via libvirt and RAM by
      redefining the persistent config, then autostart, then power: a domain that should be running
      is started, one that should not is asked to shut down and is destroyed if it is still up after
      60 seconds. vCPU and RAM take effect on the guest's next boot, so a domain that keeps running
@@ -196,17 +199,43 @@ so it is not handed a second, empty set of them next to the originals.
 listed, continuing after every target name the domain template already uses, so inserting a disk
 above an existing one shifts the letters of the ones below it. The by-id path does not move.
 
-Disks are **add-only**, and deliberately so: a data disk holds the only copy of whatever is on it,
-and Mnemosyne has no way to tell a disk that is safe to destroy from one that is not.
+Disks are **never removed or shrunk**, and deliberately so: a data disk holds the only copy of
+whatever is on it, and Mnemosyne has no way to tell a disk that is safe to destroy from one that is
+not. They do grow: raising a `size` in the inventory — or the VM's own `disk:` — is applied on the
+next run.
 
 | Change in the inventory | What happens |
 | --- | --- |
 | A new entry under `extraDisks` | The volume is created and the disk attached — to a VM being created, and to one that already exists. On a running guest it is hot-plugged; if the hypervisor or guest cannot, it is written to the persistent config and appears on the domain's next start, reported as `applies after power cycle`. |
 | An entry removed | **Nothing.** The disk stays attached and is reported as `not in the inventory - left as is`. Detach it with `virsh detach-disk` and delete the volume yourself if that is what you want. |
-| `size` changed | **Nothing yet.** The mismatch is reported as `left as is`; growing a disk is a separate operation, and shrinking one would destroy whatever sits past the new end. |
+| `size` increased | The disk is grown on the hypervisor, to the new size exactly. A running domain is resized through QEMU and the guest sees the new capacity immediately; a shut-down one has its volume resized in the pool and sees it at its next boot. **The partition and the filesystem inside the guest are not touched** — see below. |
+| `size` decreased | **Nothing, and the run stops.** Shrinking a disk destroys whatever sits past the new end, so the VM is listed as `blocked` with both sizes and nothing is applied, in any group, until the inventory says at least what the disk already is. |
 | `pool` changed on an existing disk | **Nothing.** Data is never moved between pools; the disk is reported as missing from the new pool and left where it is. |
 | A disk attached by hand, outside the inventory | Reported once, never touched. |
 | The VM removed from the inventory | Its extra disks are deleted along with its root disk. The plan lists every volume by path before the confirmation window, so nothing disappears unannounced — and `--no-delete` keeps all of them. |
+
+### Growing a disk
+
+Raise `disk:` for the root disk, or an entry's `size:` under `extraDisks`, and the next run makes
+the volume that big. Both are applied the same way, and the hypervisor does all of the work:
+
+| The domain is | How it is grown | When the guest sees it |
+| --- | --- | --- |
+| running | `virDomainBlockResize` — QEMU grows the image and raises a capacity-change event on the virtio device | immediately, no reboot |
+| shut down | `virStorageVolResize` on the volume in its pool | at its next boot |
+
+Growing is applied like any other drift, next to vCPU and RAM: there is no separate flag for it.
+Run with `--plan` first — a grow is on the update line, as `grow root disk 25G->40G` — and the
+ten-second confirmation window is the second chance to stop it.
+
+**What happens inside the guest is yours.** Mnemosyne hands the guest a bigger block device and
+stops there; the partition table and the filesystem on it are the administrator's, exactly as they
+are for a new extra disk. On a typical Linux guest that is `growpart /dev/vda 1` followed by
+`resize2fs` or `xfs_growfs`. A GPT disk also has its backup header left in the middle of the device
+after a grow, which most tools report and `sgdisk -e /dev/vda` fixes.
+
+Nothing here is reversible, which is why the reverse is refused outright: an inventory that asks for
+less than the disk already is stops the run rather than shrinking anything.
 
 **`applies after power cycle` means stopping and starting the domain**, not rebooting from inside
 the guest. A guest reboot keeps the same QEMU process, and with it exactly the devices the domain was

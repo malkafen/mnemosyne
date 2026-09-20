@@ -40,7 +40,9 @@
       ram: 2048                      # RAM in MiB (256-1048576)
       ip: "192.0.2.40/24"            # primary address in CIDR notation
       gateway: "192.0.2.1"           # default gateway (plain IPv4)
-      disk: 30                       # disk size in GiB (minimum 10); base image is resized to this
+      disk: 30                       # disk size in GiB (minimum 10); base image is resized to this.
+                                     # Raising it later grows the disk on the next run; lowering it
+                                     # is refused and stops the run.
       pool: "default"                # libvirt storage pool holding the base image and new disk
       network: "host-bridge"         # libvirt network / bridge to attach the VM to
       launch: true                   # the VM must be running; every run brings it to this state.
@@ -61,13 +63,15 @@
       #         /dev/vdb: the letters follow the order of this list and would shift if a
       #         disk were ever inserted above.
       # `size`  GiB, at least 1. No base image has to fit in it, so there is no 10 GiB floor.
+      #         Raise it later and the disk is grown on the next run; lower it and the run stops.
       # `pool`  optional; defaults to the VM's own `pool` above.
       #
-      # Disks are ADD-ONLY. A new entry here is created and attached on the next run — to a
-      # VM that already exists too, hot-plugged if the guest allows it and applied on the
-      # next boot otherwise. Removing an entry does NOT delete anything: the disk stays
-      # attached and is reported as "not in the inventory". Changing `size` does nothing
-      # yet and is reported as a mismatch. Deleting the VM itself DOES delete these
+      # Disks are never removed or shrunk. A new entry here is created and attached on the
+      # next run — to a VM that already exists too, hot-plugged if the guest allows it and
+      # applied on the next boot otherwise. Removing an entry does NOT delete anything: the
+      # disk stays attached and is reported as "not in the inventory". Raising `size` GROWS
+      # the disk (the guest's partition and filesystem are still yours to extend); lowering
+      # it is refused and stops the whole run. Deleting the VM itself DOES delete these
       # volumes, along with the root disk; the plan names every one of them first.
       extraDisks:
         - name: data                 # -> /dev/disk/by-id/virtio-data in the guest

@@ -40,12 +40,16 @@ public class PlanPrintTest {
     return new DomainState(id, 2, 2048, id, "1", "mnemosyne", List.of(disks), true, false);
   }
 
-  private static String print(Plan plan, DiskAudit audit) {
+  private static String print(Plan plan) {
+    return print(plan, new Preflight());
+  }
+
+  private static String print(Plan plan, Preflight preflight) {
     PrintStream original = System.out;
     ByteArrayOutputStream buffer = new ByteArrayOutputStream();
     try {
       System.setOut(new PrintStream(buffer, true, StandardCharsets.UTF_8));
-      plan.print("hv01", false, new Preflight(), audit);
+      plan.print("hv01", false, preflight);
     } finally {
       System.setOut(original);
     }
@@ -58,7 +62,7 @@ public class PlanPrintTest {
     Server s = server("web-01", disk("data", 40, "default"), disk("logs", 50, "nvme"));
     Plan plan = new Plan(List.of(), Map.of("web-01", s), false);
     // Act
-    String out = print(plan, new DiskAudit());
+    String out = print(plan);
     // Assert
     assertThat(out)
         .contains("create: 1")
@@ -76,35 +80,57 @@ public class PlanPrintTest {
             Map.of("web-01", server("web-01", disk("data", 40, "default"))),
             false);
     // Act
-    String out = print(plan, new DiskAudit());
+    String out = print(plan);
     // Assert
     assertThat(out).contains("update: 1").contains("~ web-01  (attach 'data' 40G as vdb)");
   }
 
   @Test
-  void aSizeMismatchIsPrintedAsANoteUnderTheVm_notAsAChange() {
-    // The inventory says 50 and the disk is 40. Nothing will be done about it in this run, and
-    // saying nothing would make the two look like they agree.
+  void aDiskSmallerThanTheInventoryIsPrintedAsAChange_notAsANote() {
+    // The inventory says 50 and the disk is 40, so the run will grow it. It is a change, and it
+    // has to be on the update line before the confirmation window rather than under it.
     // Arrange
     Plan plan =
         new Plan(
             List.of(
                 managed(
                     "web-01",
-                    new DomainState.Disk("vda", IMAGES + "web-01.qcow2", null),
-                    new DomainState.Disk("vdb", IMAGES + "web-01-data.qcow2", "data"))),
+                    new DomainState.Disk("vda", IMAGES + "web-01.qcow2", null, 30),
+                    new DomainState.Disk("vdb", IMAGES + "web-01-data.qcow2", "data", 40))),
             Map.of("web-01", server("web-01", disk("data", 50, "default"))),
             false);
-    DiskAudit audit = new DiskAudit();
-    audit.add("web-01", "disk 'data' is 40G on the host, 50G in the inventory - left as is");
     // Act
-    String out = print(plan, audit);
+    String out = print(plan);
     // Assert
     assertThat(out)
-        .contains("note: 1")
-        .doesNotContain("update: 1")
-        .contains("i web-01")
-        .contains("disk 'data' is 40G on the host, 50G in the inventory - left as is");
+        .contains("update: 1")
+        .doesNotContain("note: 1")
+        .contains("~ web-01  (grow disk 'data' 40G->50G)");
+  }
+
+  @Test
+  void aDiskBiggerThanTheInventoryBlocksTheVm_andIsNeverShrunk() {
+    // The host has 50G, the inventory asks for 40G. Shrinking would throw away whatever lives past
+    // the 40G mark, so the run stops and the operator fixes the inventory instead.
+    // Arrange
+    Plan plan =
+        new Plan(
+            List.of(
+                managed(
+                    "web-01",
+                    new DomainState.Disk("vda", IMAGES + "web-01.qcow2", null, 30),
+                    new DomainState.Disk("vdb", IMAGES + "web-01-data.qcow2", "data", 50))),
+            Map.of("web-01", server("web-01", disk("data", 40, "default"))),
+            false);
+    // The shrink is a finding of the plan; preflight is what turns it into a refusal.
+    Preflight preflight = new Preflight();
+    preflight.add(new Preflight.Problem("disk 'data' of 'web-01'", "never shrunk"), "web-01");
+    // Act
+    String out = print(plan, preflight);
+    // Assert
+    assertThat(plan.getShrinks()).containsKey("web-01");
+    assertThat(plan.getToUpdate()).doesNotContainKey("web-01");
+    assertThat(out).contains("blocked: 1").contains("! web-01").contains("never shrunk");
   }
 
   @Test
@@ -120,7 +146,7 @@ public class PlanPrintTest {
             Map.of("web-01", server("web-01")),
             false);
     // Act
-    String out = print(plan, new DiskAudit());
+    String out = print(plan);
     // Assert
     assertThat(out)
         .contains("disk 'vdb' (scratch.qcow2) is not in the inventory - left as is")
@@ -142,7 +168,7 @@ public class PlanPrintTest {
             Map.of(),
             false);
     // Act
-    String out = print(plan, new DiskAudit());
+    String out = print(plan);
     // Assert
     assertThat(out)
         .contains("delete: 1")
@@ -151,28 +177,30 @@ public class PlanPrintTest {
   }
 
   @Test
-  void anAttachAndANoteOnTheSameVmAppearTogether() {
+  void anAttachAGrowAndANoteOnTheSameVmAppearTogether() {
+    // One VM with all three disk outcomes at once: a disk to add, a disk to grow, and a disk
+    // nobody claims. They must not crowd each other out of the entry.
     // Arrange
     Plan plan =
         new Plan(
             List.of(
                 managed(
                     "web-01",
-                    new DomainState.Disk("vda", IMAGES + "web-01.qcow2", null),
-                    new DomainState.Disk("vdb", IMAGES + "web-01-data.qcow2", "data"))),
+                    new DomainState.Disk("vda", IMAGES + "web-01.qcow2", null, 30),
+                    new DomainState.Disk("vdb", IMAGES + "web-01-data.qcow2", "data", 30),
+                    new DomainState.Disk("vdc", IMAGES + "scratch.qcow2", null, 10))),
             Map.of(
                 "web-01", server("web-01", disk("data", 40, "default"), disk("logs", 50, "nvme"))),
             false);
-    DiskAudit audit = new DiskAudit();
-    audit.add("web-01", "disk 'data' is 30G on the host, 40G in the inventory - left as is");
     // Act
-    String out = print(plan, audit);
+    String out = print(plan);
     // Assert
     assertThat(out)
         .contains("update: 1")
         .doesNotContain("note: 1")
-        .contains("attach 'logs' 50G as vdc")
-        .contains("disk 'data' is 30G on the host, 40G in the inventory - left as is");
+        .contains("attach 'logs' 50G as vdd")
+        .contains("grow disk 'data' 30G->40G")
+        .contains("disk 'vdc' (scratch.qcow2) is not in the inventory - left as is");
   }
 
   @Test
@@ -188,7 +216,7 @@ public class PlanPrintTest {
             Map.of("web-01", server("web-01", disk("data", 40, "default"))),
             false);
     // Act
-    String out = print(plan, new DiskAudit());
+    String out = print(plan);
     // Assert
     assertThat(out).contains("no changes");
   }

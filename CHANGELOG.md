@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- An existing disk is grown when the inventory asks for more, both the root disk (`disk:`) and any
+  `extraDisks` entry. The hypervisor does the work: a running domain is resized through QEMU
+  (`virDomainBlockResize`), which raises a capacity-change event on the virtio device so the guest
+  sees the new size without a reboot; a shut-down domain has its volume resized in the pool and
+  sees it at its next boot. The size is absolute rather than a delta, so a retried run finds the
+  disk already correct. Growing is ordinary drift, reported on the update line as
+  `grow root disk 25G->40G` and applied like vCPU or RAM — `--plan` and the confirmation window
+  are what stand in front of it. Partitions and filesystems inside the guest are untouched and
+  stay with the administrator.
+- A disk **larger** than the inventory asks for now stops the run instead of being reported and
+  forgotten: the VM is listed as `blocked` with both sizes, and nothing is created, updated or
+  deleted in any group until the inventory matches. Shrinking a disk destroys whatever sits past
+  the new end, so it is never done, and an inventory that quietly disagreed with the host was the
+  more dangerous of the two options.
+
+### Changed
+- Disk capacities are read into the state snapshot before the plan is built, so size drift is
+  decided in `Plan` alongside vCPU, RAM, power and autostart rather than in a second pass beside
+  it. `DiskAudit`, which existed only to report a size mismatch nobody acted on, is gone.
+- An entry preflight refuses is printed as `blocked` wherever it appears — an update or a bare
+  note, not only a creation — so the plan stops describing work that is not going to happen.
+
 - `extraDisks` gives a VM additional blank disks: a list of `name`, `size` and an optional
   `pool` that defaults to the VM's own. They are created as sparse qcow2 volumes named
   `<vm>-<disk>.qcow2` and attached after the root disk, and they reach the guest raw —
