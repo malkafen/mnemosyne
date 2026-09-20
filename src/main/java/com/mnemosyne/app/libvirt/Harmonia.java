@@ -1,6 +1,5 @@
 package com.mnemosyne.app.libvirt;
 
-import com.mnemosyne.app.exception.VolumeCleanupException;
 import com.mnemosyne.app.http.CloudInitServer;
 import com.mnemosyne.app.libvirt.DomainOps.DomainSpec;
 import com.mnemosyne.app.libvirt.StorageOps.PoolCheck;
@@ -242,16 +241,35 @@ public class Harmonia implements AutoCloseable {
     report.print(group);
   }
 
+  /**
+   * Applies the plan to the host, one VM at a time.
+   *
+   * <p>A failure belongs to the VM it happened on and to nothing else: every entry is attempted,
+   * the ones that fail are reported as skipped, and the run carries on. That holds whatever the
+   * failure is. libvirt refusing a call is the expected kind; a template that cannot be rendered is
+   * the other, and it arrives as an unchecked exception from deep inside the builders. Catching
+   * only {@link LibvirtException} let that second kind escape the loop and take the whole run with
+   * it — the VMs already created went unreported, their seeds were never served because the
+   * cloud-init server was stopped on the way out, and a guest that had booted without one could
+   * never be configured again, because the next run finds the domain healthy and starts an existing
+   * VM without a seed.
+   *
+   * <p>The report is printed from a {@code finally} block for the same reason: whatever stops the
+   * run, what was already applied to the host is what gets printed.
+   */
   public void reconcile() {
     if (this.plan == null) {
       log.debug("[ {} ] nothing to reconcile (no plan)", group);
       return;
     }
     Report report = new Report();
-    delete(report);
-    update(report);
-    create(report);
-    report.print(group);
+    try {
+      delete(report);
+      update(report);
+      create(report);
+    } finally {
+      report.print(group);
+    }
   }
 
   // Reconcile methods
@@ -264,7 +282,7 @@ public class Harmonia implements AutoCloseable {
         storageOps.deleteVolumes(diskPaths, name);
         report.add("delete", "-", name, diskPaths.isEmpty() ? "no disks" : "");
         report.sub(diskPaths);
-      } catch (LibvirtException | VolumeCleanupException e) {
+      } catch (LibvirtException | RuntimeException e) {
         log.debug("[ {} ] delete failed for '{}'", group, name, e);
         report.skip(name, "delete failed: " + cause(e));
       }
@@ -293,7 +311,7 @@ public class Harmonia implements AutoCloseable {
         }
         report.add("update", "~", s.getId(), u.diff() + restartNote(u));
         report.sub(diskLines);
-      } catch (LibvirtException e) {
+      } catch (LibvirtException | RuntimeException e) {
         log.debug("[ {} ] update failed for '{}'", group, s.getId(), e);
         report.skip(s.getId(), "update failed: " + cause(e));
       }
@@ -449,8 +467,11 @@ public class Harmonia implements AutoCloseable {
         if (!s.isLaunch()) toSettle.add(s);
         report.add("create", "+", s.getId(), s.isLaunch() ? "" : "off after init");
         report.sub(diskLines);
-      } catch (LibvirtException e) {
+      } catch (LibvirtException | RuntimeException e) {
         log.debug("[ {} ] create failed for '{}'", group, s.getId(), e);
+        // Whatever went wrong, this VM is not coming up in this run, and a seed left registered
+        // for it would hold waitForCloudInit for the full timeout and then report a VM that does
+        // not exist. Unregistering a name that was never registered costs nothing.
         CloudInitServer.unregister(s.getName());
         report.skip(s.getId(), "create failed: " + cause(e));
       }
