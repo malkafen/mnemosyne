@@ -68,6 +68,12 @@ class Mnemosyne {
       return;
     }
 
+    if (config.getParallel() < 1) {
+      cmd.getErr().println("--parallel must be at least 1");
+      System.exit(cmd.getCommandSpec().exitCodeOnInvalidInput()); // = 2
+      return;
+    }
+
     if (config.isVerbose()) enableDebugLogging();
 
     try {
@@ -109,8 +115,8 @@ class Mnemosyne {
 
       Report.heading("Applied");
       for (Iris i : irides) {
-        if (config.isJoin()) i.harmonia.join();
-        else i.harmonia().reconcile();
+        if (config.isJoin()) i.harmonia.join(config.getParallel());
+        else i.harmonia().reconcile(config.getParallel());
       }
       log.info("All {} mnemones provisioned. Waiting cloud-init is done...", mnemones.size());
       boolean cloudInitOk = CloudInitServer.waitForCloudInit().get();
@@ -122,7 +128,7 @@ class Mnemosyne {
       // against the inventory - and its own failures count towards the exit code below.
       if (irides.stream().anyMatch(i -> i.harmonia().hasPendingStop())) {
         Report.heading("Settled");
-        for (Iris i : irides) i.harmonia().settle();
+        for (Iris i : irides) i.harmonia().settle(config.getParallel());
       }
       return outcome(cloudInitOk);
     } finally {

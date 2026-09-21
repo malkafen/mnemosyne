@@ -40,6 +40,21 @@ public final class Report {
     return skipped;
   }
 
+  /**
+   * Folds another block into this one, as if its entries had been added here in the first place.
+   *
+   * <p>What it is for is a phase whose entries were applied side by side. Each one writes into a
+   * block of its own, because {@link #add} and {@link #sub} only mean anything next to each other
+   * and two VMs reporting into one list at once would interleave a disk line under the wrong entry.
+   * The blocks are folded back in the order the plan listed them, not the order the hosts happened
+   * to finish in, so the report reads the same however the work was scheduled.
+   */
+  public void merge(Report other) {
+    other.counts.forEach((verb, n) -> counts.merge(verb, n, Integer::sum));
+    lines.addAll(other.lines);
+    skipped += other.skipped;
+  }
+
   public void print(String group) {
     print(group, null);
   }
