@@ -54,17 +54,19 @@ public class Config {
   /**
    * How many VMs of one group are applied at once.
    *
-   * <p>The default is deliberately modest. libvirtd answers at most five requests per client
-   * connection at a time out of the box ({@code max_client_requests}), and the work behind these
-   * calls is a base image being copied — the hypervisor's disk is the limit long before its CPUs
-   * are. Raise it where the pool is fast and the images are small; {@code --parallel 1} applies one
-   * VM after another, which is what every version before this one did.
+   * <p>One by default, which is what every version before this one did. Applying several VMs at a
+   * time spends somebody else's hypervisor — it is their disk that copies the base images — so it
+   * is asked for rather than assumed, and an existing invocation keeps behaving exactly as it did.
+   *
+   * <p>Worth knowing when raising it: libvirtd answers at most five requests per client connection
+   * at a time out of the box ({@code max_client_requests}), and the work behind these calls is an
+   * image being cloned, so the pool's throughput is the ceiling long before the host's CPUs are.
    */
   @Option(
       names = "--parallel",
       paramLabel = "<n>",
       description = "How many VMs of a group to apply at once (default: ${DEFAULT-VALUE}).")
-  private int parallel = 4;
+  private int parallel = 1;
 
   @Option(
       names = {"--verbose", "-v"},
