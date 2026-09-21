@@ -140,7 +140,7 @@ public class HarmoniaFailureTest {
     Harmonia harmonia = new Harmonia("bm05", connect);
     // Act
     harmonia.plan(servers, false);
-    harmonia.reconcile();
+    harmonia.reconcile(1);
     // Assert
     verify(connect).domainDefineXML(contains("<name>qa-a</name>"));
     verify(connect).domainDefineXML(contains("<name>qa-c</name>"));
@@ -162,7 +162,7 @@ public class HarmoniaFailureTest {
     Harmonia harmonia = new Harmonia("bm05", connect);
     // Act
     harmonia.plan(Map.of("qa-b", server("qa-b", withoutInterface())), false);
-    harmonia.reconcile();
+    harmonia.reconcile(1);
     // Assert
     assertThat(report()).contains("[ bm05 ]").contains("skipped: 1").contains("· qa-b");
   }

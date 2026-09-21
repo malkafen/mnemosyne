@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- `--parallel <n>` applies several VMs of a group at once, four by default. The work behind a
+  `create` is a base image being copied and the work behind a `stop` is up to a minute of waiting
+  for a guest to go down, and both used to be paid once per VM, in a row. The three phases keep
+  their order — everything to delete, then everything to update, then everything to create, each
+  finished before the next begins — because a name freed by a delete has to be free before a
+  create asks for it; it is the VMs *within* a phase that now overlap, which the plan had already
+  made independent of each other. Groups are still reconciled one after another. Nothing the
+  operator reads changes: each entry writes its own block and the blocks are printed in the plan's
+  order, so the same inventory prints the same report at `--parallel 1` and at `--parallel 8`, and
+  a failure still costs its own VM and nothing else. `--parallel 1` is the old behaviour exactly,
+  and the default of 4 sits under libvirtd's `max_client_requests`, which is 5 out of the box.
 - An existing disk is grown when the inventory asks for more, both the root disk (`disk:`) and any
   `extraDisks` entry. The hypervisor does the work: a running domain is resized through QEMU
   (`virDomainBlockResize`), which raises a capacity-change event on the virtio device so the guest
@@ -23,6 +34,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   more dangerous of the two options.
 
 ### Fixed
+- A storage pool that refuses to refresh no longer costs the VM that asked. The refresh only makes
+  libvirt notice volumes put in the pool's directory behind its back; everything after it talks to
+  the host regardless, so a refresh that fails is now logged and stepped over. It has to be:
+  libvirt refuses to refresh a pool with an asynchronous job running, and cloning a base image is
+  such a job, so with several VMs being created at once in one pool the ordinary case is one of
+  them refreshing while another is still copying.
 - A run that finished with something undone now exits non-zero. A per-VM failure and a guest that
   never reported back over `phone_home` both still let the rest of the run finish, but both leave
   the host short of the inventory, and both used to end in exit `0` — a run in which no guest was

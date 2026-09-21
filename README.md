@@ -63,10 +63,16 @@ datasource served by a built-in HTTP server.
      cloud-init can configure it; a VM with `launch: false` is shut down again at the end of the
      run. A volume that already carries the expected name is reused; a failed resize is rolled back.
    Failures are per-VM: the entry is reported as skipped and the run continues.
+   Each of the three phases applies up to `--parallel` VMs at a time (4 by default) and is
+   finished before the next one starts, so a name freed by a delete is free before a create asks
+   for it. Groups are still reconciled one after another. Which VM finishes first changes nothing
+   the operator reads: every entry writes its own block and the blocks are printed in the plan's
+   order.
 7. Mnemosyne waits for every new guest to report back over cloud-init's `phone_home`, polling every
-   5 seconds up to 5 minutes. Guests created with `launch: false` are then shut down — reported
-   under `Settled`, as `initialized` or `cloud-init did not finish` — and the connections and the
-   HTTP server are closed. Starting an existing VM needs no seed and is never awaited: every
+   5 seconds up to 5 minutes. Guests created with `launch: false` are then shut down — `--parallel`
+   of them at a time, since a guest that ignores the request is waited on for a full minute before
+   it is destroyed — and reported under `Settled`, as `initialized` or `cloud-init did not
+   finish`. The connections and the HTTP server are then closed. Starting an existing VM needs no seed and is never awaited: every
    managed VM has already been through cloud-init.
 8. The run ends with a closing line and an exit code. A skipped entry or a guest that never phoned
    home leaves the host short of the inventory, so such a run exits non-zero even though
@@ -120,6 +126,7 @@ Debian/Ubuntu, `/usr/lib64` on RHEL/Fedora, `/opt/homebrew/lib` on macOS.
 | `-p`, `--plan` | Print the plan and exit without applying | off |
 | `-j`, `--join` | Adopt matching unmanaged domains; create and delete nothing | off |
 | `--no-delete` | Keep managed domains that are absent from the inventory | off |
+| `--parallel <n>` | How many VMs of a group to apply at once; `1` applies them one after another | `4` |
 | `-v`, `--verbose` | Debug logging, including full stack traces | off |
 | `-h`, `--help`, `-V`, `--version` | Usage and version | — |
 

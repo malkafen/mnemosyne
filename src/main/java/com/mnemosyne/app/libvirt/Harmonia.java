@@ -14,6 +14,7 @@ import com.mnemosyne.app.output.Report;
 import com.mnemosyne.app.utils.TargetDev;
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -21,11 +22,30 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.OptionalLong;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.BiConsumer;
 import org.libvirt.Connect;
 import org.libvirt.LibvirtException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+/**
+ * One hypervisor's share of the run: the plan for it, the checks in front of it, and the calls that
+ * apply it.
+ *
+ * <p>Within a phase the VMs may be applied several at a time — see {@link #phase} for what that is
+ * allowed to touch. Everything a worker reaches from there is either its own ({@link Server}, its
+ * own {@link Report} block) or built to be shared: {@link DomainOps}, {@link StorageOps} and {@link
+ * NetworkOps} hold nothing but the connection, libvirt connections are safe to call from several
+ * threads at once, and {@link CloudInitServer} keeps its seeds in concurrent maps because the
+ * guests were always going to fetch them in parallel.
+ */
 public class Harmonia implements AutoCloseable {
 
   private final DomainOps domainOps;
@@ -41,17 +61,32 @@ public class Harmonia implements AutoCloseable {
    */
   private List<DomainState> actual = List.of();
 
-  /** VMs booted only so cloud-init could configure them; shut down in {@link #settle()}. */
-  private final List<Server> toSettle = new ArrayList<>();
+  /**
+   * The ids of the VMs booted only so cloud-init could configure them; shut down in {@link
+   * #settle}. Ids rather than servers, and a set rather than a list, because they are written by
+   * however many workers are creating VMs at once: the order they went in carries no meaning, and
+   * {@link #pendingStops()} reads them back in the plan's order instead.
+   */
+  private final Set<String> toSettle = ConcurrentHashMap.newKeySet();
 
   /**
    * How many entries this group gave up on, across every block it printed. A per-VM failure keeps
    * the run going, but it is still a failure, and {@code Mnemosyne} turns the total into the
    * process' exit code so that a run nobody watched is not mistaken for a clean one.
+   *
+   * <p>Only ever touched by the thread that drives the group, after a phase has finished and its
+   * blocks have been folded in, so the count is one thread's arithmetic however many workers did
+   * the work.
    */
   private int failures;
 
   private static final Logger log = LoggerFactory.getLogger(Harmonia.class);
+
+  /** How long a finished phase waits for its workers before it reads their report blocks. */
+  private static final long WORKER_STOP_WAIT_S = 30L;
+
+  /** Numbers the phase workers, so a log line says which VM a thread was busy with. */
+  private static final AtomicInteger workerCount = new AtomicInteger();
 
   public Harmonia(String group, String user, String key, String host, int port)
       throws LibvirtException, IOException {
@@ -226,7 +261,7 @@ public class Harmonia implements AutoCloseable {
     return servers.stream().map(Server::getId).toList();
   }
 
-  public void join() {
+  public void join(int parallel) {
     if (this.plan == null) {
       log.debug("[ {} ] nothing to join (no plan)", group);
       return;
@@ -237,20 +272,30 @@ public class Harmonia implements AutoCloseable {
     }
 
     Report report = new Report();
-    for (Server s : this.plan.getToAdopt().values()) {
-      if (domainOps.joinDomain(s.getName(), s.buildMnemosyneMetadataXml()))
-        report.add("join", "+", s.getId(), "");
-      else {
-        log.debug("[ {} ] join failed for '{}'", group, s.getId());
-        report.skip(s.getId(), "join failed (run with -v for details)");
-      }
-    }
+    phase("join", this.plan.getToAdopt().values(), this::joinOne, report, parallel);
     report.print(group);
     failures += report.skipped();
   }
 
+  private void joinOne(Server s, Report report) {
+    if (domainOps.joinDomain(s.getName(), s.buildMnemosyneMetadataXml()))
+      report.add("join", "+", s.getId(), "");
+    else {
+      log.debug("[ {} ] join failed for '{}'", group, s.getId());
+      report.skip(s.getId(), "join failed (run with -v for details)");
+    }
+  }
+
   /**
-   * Applies the plan to the host, one VM at a time.
+   * Applies the plan to the host: everything to delete, then everything to update, then everything
+   * to create, and within each of those three up to {@code parallel} VMs at a time.
+   *
+   * <p>The order of the phases is the contract and does not bend for concurrency — a name freed by
+   * a delete has to be free before a create asks for it, and a disk added by an update has to be
+   * there before the guest is told to boot. So each phase is finished, and its results folded into
+   * the report, before the next one starts. Within a phase the entries are independent: the plan
+   * has already made every one of them about a different domain, and preflight has already refused
+   * the case where two of them want the same volume.
    *
    * <p>A failure belongs to the VM it happened on and to nothing else: every entry is attempted,
    * the ones that fail are reported as skipped, and the run carries on. That holds whatever the
@@ -265,65 +310,164 @@ public class Harmonia implements AutoCloseable {
    * <p>The report is printed from a {@code finally} block for the same reason: whatever stops the
    * run, what was already applied to the host is what gets printed.
    */
-  public void reconcile() {
+  public void reconcile(int parallel) {
     if (this.plan == null) {
       log.debug("[ {} ] nothing to reconcile (no plan)", group);
       return;
     }
     Report report = new Report();
     try {
-      delete(report);
-      update(report);
-      create(report);
+      phase("delete", plan.getToDelete().entrySet(), this::deleteOne, report, parallel);
+      phase("update", plan.getToUpdate().values(), this::updateOne, report, parallel);
+      phase("create", plan.getToCreate().values(), this::createOne, report, parallel);
     } finally {
       report.print(group);
       failures += report.skipped();
     }
   }
 
-  // Reconcile methods
-  private void delete(Report report) {
-    for (String name : plan.getToDelete().keySet()) {
-      List<String> diskPaths = plan.getToDelete().get(name);
+  /**
+   * Runs one phase's entries, at most {@code parallel} of them at a time, and folds what each one
+   * reported into {@code report} in the order the plan listed them.
+   *
+   * <p>What a worker is allowed to touch is what makes this safe, and it is worth stating: its own
+   * entry, its own block of the report, and the hypervisor. Nothing else is shared but the
+   * connection and the three {@code *Ops} that wrap it, none of which keeps state between calls.
+   * The two pieces of the run that several entries do write to at once — the cloud-init seeds and
+   * the set of VMs owed a shutdown — are concurrent collections, and neither is read until the
+   * phase is over.
+   *
+   * <p>The report is not built as the work lands. Each entry writes into a block of its own and the
+   * blocks are folded back in the plan's order afterwards, so the same inventory prints the same
+   * report whether it ran one VM at a time or eight, and a disk line never turns up under somebody
+   * else's VM.
+   *
+   * <p>{@code parallel} of 1 keeps the phase on the calling thread, with no pool and no handoff:
+   * the sequential run stays exactly what it was.
+   */
+  private <T> void phase(
+      String what, Collection<T> entries, BiConsumer<T, Report> work, Report report, int parallel) {
+    if (entries.isEmpty()) return;
+
+    List<T> items = List.copyOf(entries);
+    List<Report> blocks = new ArrayList<>(items.size());
+    for (int i = 0; i < items.size(); i++) blocks.add(new Report());
+
+    int workers = Math.min(Math.max(parallel, 1), items.size());
+    log.debug("[ {} ] {}: {} entries, {} at a time", group, what, items.size(), workers);
+
+    if (workers == 1) {
       try {
-        domainOps.destroyDomain(name);
-        domainOps.undefineDomain(name);
-        storageOps.deleteVolumes(diskPaths, name);
-        report.add("delete", "-", name, diskPaths.isEmpty() ? "no disks" : "");
-        report.sub(diskPaths);
-      } catch (LibvirtException | RuntimeException e) {
-        log.debug("[ {} ] delete failed for '{}'", group, name, e);
-        report.skip(name, "delete failed: " + cause(e));
+        for (int i = 0; i < items.size(); i++) work.accept(items.get(i), blocks.get(i));
+      } finally {
+        blocks.forEach(report::merge);
       }
+      return;
+    }
+
+    ExecutorService pool = Executors.newFixedThreadPool(workers, Harmonia::worker);
+    try {
+      List<Future<?>> running = new ArrayList<>(items.size());
+      for (int i = 0; i < items.size(); i++) {
+        T item = items.get(i);
+        Report block = blocks.get(i);
+        running.add(pool.submit(() -> work.accept(item, block)));
+      }
+      await(running);
+    } finally {
+      // Both in a finally, and in this order: whatever stopped the phase, the entries that did
+      // finish are on the host and belong in the report.
+      stopWorkers(pool);
+      blocks.forEach(report::merge);
     }
   }
 
-  private void update(Report report) {
-    for (Plan.Update u : plan.getToUpdate().values()) {
-      Server s = u.server();
-      String name = u.actual().name();
+  /**
+   * Waits for every entry of a phase, including the ones queued behind a failure.
+   *
+   * <p>Draining all of them rather than giving up at the first is what keeps the contract: a VM
+   * whose neighbour blew up is still attempted, still reported, and — because its block is only
+   * read once its worker is gone — still reported correctly.
+   */
+  private static void await(List<Future<?>> running) {
+    RuntimeException failure = null;
+    for (Future<?> f : running) {
       try {
-        // Disks first, and always before the power state: a disk written into the persistent
-        // config before a shutdown or a start is already there when the guest comes up, so the
-        // same run does not have to both add it and restart for it. Growing comes after adding,
-        // for the same reason in reverse: a disk that was just created already has its final size,
-        // so there is never anything to grow among the ones this run added.
-        List<String> diskLines = new ArrayList<>(attachDisks(u));
-        diskLines.addAll(growDisks(u));
-        if (u.cpuChanged()) domainOps.updateCpu(name, s.getCpu());
-        if (u.ramChanged()) domainOps.updateRam(name, s.getRam());
-        if (u.autostartChanged()) domainOps.updateAutostart(name, s.getAutostart());
-        if (u.powerChanged()) {
-          // Every managed VM has been through cloud-init at creation, so a start needs no seed.
-          if (s.isLaunch()) domainOps.startDomain(name);
-          else domainOps.shutdownDomain(name);
-        }
-        report.add("update", "~", s.getId(), u.diff() + restartNote(u));
-        report.sub(diskLines);
-      } catch (LibvirtException | RuntimeException e) {
-        log.debug("[ {} ] update failed for '{}'", group, s.getId(), e);
-        report.skip(s.getId(), "update failed: " + cause(e));
+        f.get();
+      } catch (InterruptedException e) {
+        Thread.currentThread().interrupt();
+        throw new IllegalStateException("interrupted while applying the plan", e);
+      } catch (ExecutionException e) {
+        // Nothing ordinary arrives here: an entry catches its own failure and reports it as
+        // skipped. What does is a bug in this class, and it is raised once the phase is over.
+        Throwable c = e.getCause();
+        if (failure == null)
+          failure = (c instanceof RuntimeException r) ? r : new IllegalStateException(c);
       }
+    }
+    if (failure != null) throw failure;
+  }
+
+  /** Stops a phase's workers and waits for them, because their blocks are read straight after. */
+  private static void stopWorkers(ExecutorService pool) {
+    pool.shutdownNow();
+    try {
+      if (!pool.awaitTermination(WORKER_STOP_WAIT_S, TimeUnit.SECONDS))
+        log.debug(
+            "A worker did not stop within {}s; its report block may be short", WORKER_STOP_WAIT_S);
+    } catch (InterruptedException e) {
+      Thread.currentThread().interrupt();
+    }
+  }
+
+  private static Thread worker(Runnable r) {
+    Thread t = new Thread(r, "mnemosyne-apply-" + workerCount.incrementAndGet());
+    // Daemon for the same reason the cloud-init threads are: a worker that outlives the phase it
+    // was interrupted in must not be what keeps the process alive.
+    t.setDaemon(true);
+    return t;
+  }
+
+  // Reconcile methods
+  private void deleteOne(Map.Entry<String, List<String>> entry, Report report) {
+    String name = entry.getKey();
+    List<String> diskPaths = entry.getValue();
+    try {
+      domainOps.destroyDomain(name);
+      domainOps.undefineDomain(name);
+      storageOps.deleteVolumes(diskPaths, name);
+      report.add("delete", "-", name, diskPaths.isEmpty() ? "no disks" : "");
+      report.sub(diskPaths);
+    } catch (LibvirtException | RuntimeException e) {
+      log.debug("[ {} ] delete failed for '{}'", group, name, e);
+      report.skip(name, "delete failed: " + cause(e));
+    }
+  }
+
+  private void updateOne(Plan.Update u, Report report) {
+    Server s = u.server();
+    String name = u.actual().name();
+    try {
+      // Disks first, and always before the power state: a disk written into the persistent
+      // config before a shutdown or a start is already there when the guest comes up, so the
+      // same run does not have to both add it and restart for it. Growing comes after adding,
+      // for the same reason in reverse: a disk that was just created already has its final size,
+      // so there is never anything to grow among the ones this run added.
+      List<String> diskLines = new ArrayList<>(attachDisks(u));
+      diskLines.addAll(growDisks(u));
+      if (u.cpuChanged()) domainOps.updateCpu(name, s.getCpu());
+      if (u.ramChanged()) domainOps.updateRam(name, s.getRam());
+      if (u.autostartChanged()) domainOps.updateAutostart(name, s.getAutostart());
+      if (u.powerChanged()) {
+        // Every managed VM has been through cloud-init at creation, so a start needs no seed.
+        if (s.isLaunch()) domainOps.startDomain(name);
+        else domainOps.shutdownDomain(name);
+      }
+      report.add("update", "~", s.getId(), u.diff() + restartNote(u));
+      report.sub(diskLines);
+    } catch (LibvirtException | RuntimeException e) {
+      log.debug("[ {} ] update failed for '{}'", group, s.getId(), e);
+      report.skip(s.getId(), "update failed: " + cause(e));
     }
   }
 
@@ -458,32 +602,30 @@ public class Harmonia implements AutoCloseable {
     return (u.cpuChanged() || u.ramChanged()) && staysUp ? ", applies after restart" : "";
   }
 
-  private void create(Report report) {
-    for (Server s : plan.getToCreate().values()) {
-      try {
-        VolumeSpec volSpec =
-            new VolumeSpec(
-                s.getVolName(), s.getPool(), s.buildVolumeXml(), s.getVolLookup(), s.getDisk());
-        s.setVolPath(storageOps.provisionVolume(volSpec));
-        // Every disk must exist before the domain XML is built: the XML points at their paths.
-        List<String> diskLines = createExtraVolumes(s);
-        // A new VM always boots once so cloud-init can configure it; launch:false is honoured
-        // afterwards, in settle().
-        DomainSpec domainSpec =
-            new DomainSpec(s.getName(), s.buildServerXml(), true, s.getAutostart());
-        CloudInitServer.register(s.buildSeed());
-        domainOps.setupDomain(domainSpec);
-        if (!s.isLaunch()) toSettle.add(s);
-        report.add("create", "+", s.getId(), s.isLaunch() ? "" : "off after init");
-        report.sub(diskLines);
-      } catch (LibvirtException | RuntimeException e) {
-        log.debug("[ {} ] create failed for '{}'", group, s.getId(), e);
-        // Whatever went wrong, this VM is not coming up in this run, and a seed left registered
-        // for it would hold waitForCloudInit for the full timeout and then report a VM that does
-        // not exist. Unregistering a name that was never registered costs nothing.
-        CloudInitServer.unregister(s.getName());
-        report.skip(s.getId(), "create failed: " + cause(e));
-      }
+  private void createOne(Server s, Report report) {
+    try {
+      VolumeSpec volSpec =
+          new VolumeSpec(
+              s.getVolName(), s.getPool(), s.buildVolumeXml(), s.getVolLookup(), s.getDisk());
+      s.setVolPath(storageOps.provisionVolume(volSpec));
+      // Every disk must exist before the domain XML is built: the XML points at their paths.
+      List<String> diskLines = createExtraVolumes(s);
+      // A new VM always boots once so cloud-init can configure it; launch:false is honoured
+      // afterwards, in settle().
+      DomainSpec domainSpec =
+          new DomainSpec(s.getName(), s.buildServerXml(), true, s.getAutostart());
+      CloudInitServer.register(s.buildSeed());
+      domainOps.setupDomain(domainSpec);
+      if (!s.isLaunch()) toSettle.add(s.getId());
+      report.add("create", "+", s.getId(), s.isLaunch() ? "" : "off after init");
+      report.sub(diskLines);
+    } catch (LibvirtException | RuntimeException e) {
+      log.debug("[ {} ] create failed for '{}'", group, s.getId(), e);
+      // Whatever went wrong, this VM is not coming up in this run, and a seed left registered
+      // for it would hold waitForCloudInit for the full timeout and then report a VM that does
+      // not exist. Unregistering a name that was never registered costs nothing.
+      CloudInitServer.unregister(s.getName());
+      report.skip(s.getId(), "create failed: " + cause(e));
     }
   }
 
@@ -523,25 +665,35 @@ public class Harmonia implements AutoCloseable {
    * phone_home wait, so the host still matches the inventory when the run ends — a cloud-init
    * timeout does not keep a launch:false VM running.
    */
-  public void settle() {
+  public void settle(int parallel) {
     Report report = new Report();
-    for (Server s : toSettle) {
-      // Read before the shutdown, because the answer is about the boot that is ending here.
-      boolean initialized = CloudInitServer.initialized(s.getName());
-      try {
-        domainOps.shutdownDomain(s.getName());
-        // The VM is stopped either way - it must not stay up against the inventory - but the
-        // word for it is not the same. A guest that never phoned home was booted and nothing
-        // more, and "initialized" would be a lie in the one case where it matters.
-        report.add(
-            "stop", "-", s.getId(), initialized ? "initialized" : "cloud-init did not finish");
-      } catch (LibvirtException e) {
-        log.debug("[ {} ] shutdown failed for '{}'", group, s.getId(), e);
-        report.skip(s.getId(), "shutdown failed: " + cause(e));
-      }
-    }
+    // Worth applying side by side more than anything else here: a guest that ignores the shutdown
+    // request is waited on for a full minute before it is destroyed, and done one after another
+    // that minute is paid once per VM.
+    phase("stop", pendingStops(), this::settleOne, report, parallel);
     report.print(group);
     failures += report.skipped();
+  }
+
+  private void settleOne(Server s, Report report) {
+    // Read before the shutdown, because the answer is about the boot that is ending here.
+    boolean initialized = CloudInitServer.initialized(s.getName());
+    try {
+      domainOps.shutdownDomain(s.getName());
+      // The VM is stopped either way - it must not stay up against the inventory - but the
+      // word for it is not the same. A guest that never phoned home was booted and nothing
+      // more, and "initialized" would be a lie in the one case where it matters.
+      report.add("stop", "-", s.getId(), initialized ? "initialized" : "cloud-init did not finish");
+    } catch (LibvirtException | RuntimeException e) {
+      log.debug("[ {} ] shutdown failed for '{}'", group, s.getId(), e);
+      report.skip(s.getId(), "shutdown failed: " + cause(e));
+    }
+  }
+
+  /** The VMs {@link #createOne} booted for cloud-init and owes a shutdown, in the plan's order. */
+  private List<Server> pendingStops() {
+    if (this.plan == null || toSettle.isEmpty()) return List.of();
+    return plan.getToCreate().values().stream().filter(s -> toSettle.contains(s.getId())).toList();
   }
 
   public boolean hasPendingStop() {

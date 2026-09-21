@@ -121,7 +121,7 @@ public class HarmoniaGrowTest {
     Harmonia harmonia = new Harmonia("hv01", connect);
     // Act
     Plan plan = harmonia.plan(Map.of(NAME, server(40, true)), false);
-    harmonia.reconcile();
+    harmonia.reconcile(1);
     // Assert
     assertThat(plan.getToUpdate().get(NAME).diff()).contains("grow root disk 25G->40G");
     verify(domain).blockResize("vda", 40 * GIB, 1);
@@ -141,7 +141,7 @@ public class HarmoniaGrowTest {
     Harmonia harmonia = new Harmonia("hv01", connect);
     // Act
     harmonia.plan(Map.of(NAME, server(40, false)), false);
-    harmonia.reconcile();
+    harmonia.reconcile(1);
     // Assert
     verify(rootVol).resize(40 * GIB, 0);
     verify(domain, never()).blockResize(anyString(), anyLong(), anyInt());
@@ -162,7 +162,7 @@ public class HarmoniaGrowTest {
     Harmonia harmonia = new Harmonia("hv01", connect);
     // Act
     harmonia.plan(Map.of(NAME, server(25, true, extra("data", 20))), false);
-    harmonia.reconcile();
+    harmonia.reconcile(1);
     // Assert
     verify(domain).blockResize("vdb", 20 * GIB, 1);
     verify(domain, never()).blockResize(eq("vda"), anyLong(), anyInt());
@@ -178,7 +178,7 @@ public class HarmoniaGrowTest {
     Harmonia harmonia = new Harmonia("hv01", connect);
     // Act
     Plan plan = harmonia.plan(Map.of(NAME, server(25, true)), false);
-    harmonia.reconcile();
+    harmonia.reconcile(1);
     // Assert
     assertThat(plan.getToUpdate()).isEmpty();
     verify(domain, never()).blockResize(anyString(), anyLong(), anyInt());
@@ -215,7 +215,7 @@ public class HarmoniaGrowTest {
     Harmonia harmonia = new Harmonia("hv01", connect);
     // Act
     Plan plan = harmonia.plan(Map.of(NAME, server(40, true)), false);
-    harmonia.reconcile();
+    harmonia.reconcile(1);
     // Assert
     assertThat(plan.getToUpdate()).isEmpty();
     assertThat(plan.getShrinks()).isEmpty();

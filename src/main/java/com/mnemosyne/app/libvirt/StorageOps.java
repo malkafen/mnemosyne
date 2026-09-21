@@ -266,6 +266,20 @@ class StorageOps {
     }
   }
 
+  /**
+   * The pool, refreshed if libvirt lets it be.
+   *
+   * <p>The refresh is a cache warm-up and nothing more: it makes libvirt notice volumes that were
+   * put in the pool's directory behind its back, so that one of them is found and reused instead of
+   * being clobbered. Everything after it talks to the host either way, which is why a refresh that
+   * fails is logged and stepped over rather than costing the VM.
+   *
+   * <p>It has to be stepped over, too. libvirt refuses to refresh a pool that has an asynchronous
+   * job running, and cloning a base image is exactly such a job — so with several VMs being created
+   * at once in one pool, the ordinary case is one of them refreshing while another is still
+   * copying. Treating that as a failure would make a VM's fate depend on its neighbour's timing,
+   * which is the one thing per-VM isolation is for.
+   */
   private StoragePool lookupPool(String name) throws LibvirtException {
     StoragePool pool;
     try {
@@ -277,9 +291,7 @@ class StorageOps {
     try {
       pool.refresh(0);
     } catch (LibvirtException e) {
-      log.debug("Storage pool '{}' found, but refresh failed: {}", name, e.getMessage(), e);
-      freePoolQuietly(pool);
-      throw e;
+      log.debug("Storage pool '{}' found, refresh skipped: {}", name, e.getMessage(), e);
     }
     log.debug("Storage pool '{}' ready", name);
     return pool;
