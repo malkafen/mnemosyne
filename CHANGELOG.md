@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
-- `--parallel <n>` applies several VMs of a group at once, four by default. The work behind a
+- `--parallel <n>` applies several VMs of a group at once. The work behind a
   `create` is a base image being copied and the work behind a `stop` is up to a minute of waiting
   for a guest to go down, and both used to be paid once per VM, in a row. The three phases keep
   their order — everything to delete, then everything to update, then everything to create, each
@@ -16,8 +16,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   made independent of each other. Groups are still reconciled one after another. Nothing the
   operator reads changes: each entry writes its own block and the blocks are printed in the plan's
   order, so the same inventory prints the same report at `--parallel 1` and at `--parallel 8`, and
-  a failure still costs its own VM and nothing else. `--parallel 1` is the old behaviour exactly,
-  and the default of 4 sits under libvirtd's `max_client_requests`, which is 5 out of the box.
+  a failure still costs its own VM and nothing else. The default is `1`, so an existing invocation
+  behaves exactly as it did: applying several VMs at once spends somebody else's hypervisor, and is
+  asked for rather than assumed. When raising it, libvirtd answers at most five requests per client
+  connection at a time out of the box (`max_client_requests`).
 - An existing disk is grown when the inventory asks for more, both the root disk (`disk:`) and any
   `extraDisks` entry. The hypervisor does the work: a running domain is resized through QEMU
   (`virDomainBlockResize`), which raises a capacity-change event on the virtio device so the guest
