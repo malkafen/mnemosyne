@@ -232,7 +232,7 @@ next run.
 | `size` decreased | **Nothing, and the run stops.** Shrinking a disk destroys whatever sits past the new end, so the VM is listed as `blocked` with both sizes and nothing is applied, in any group, until the inventory says at least what the disk already is. |
 | `pool` changed on an existing disk | **Nothing.** Data is never moved between pools; the disk is reported as missing from the new pool and left where it is. |
 | A disk attached by hand, outside the inventory | Reported once, never touched — also when the VM is deleted, unless `--purge-disks` is given. |
-| The VM removed from the inventory | The volumes Mnemosyne created for it — root and extra disks, recorded in the domain's metadata — are deleted with it. Anything else stays and is listed under the delete as `left as is`: a volume attached by hand or belonging to an adopted VM (`--purge-disks` deletes those too), and always a volume that another domain also uses. The plan lists every volume by path before the confirmation window, so nothing disappears unannounced — and `--no-delete` keeps all of them. |
+| The VM removed from the inventory | The volumes Mnemosyne created for it — root and extra disks, recorded in the domain's metadata — are deleted with it. Anything else stays and is listed under the delete as `left as is`: a volume attached by hand or belonging to an adopted VM (`--purge-disks` deletes those too), and always a volume that another domain also uses or that Mnemosyne created but somebody detached from the VM. The plan lists every volume by path before the confirmation window, so nothing disappears unannounced — and `--no-delete` keeps all of them. |
 
 ### Growing a disk
 

@@ -209,7 +209,10 @@ public class XmlUtilTest {
             <mnem:mnemosyne xmlns:mnem="https://mnemosyne.dev/schema/v1">
               <mnem:managedBy>mnemosyne</mnem:managedBy>
               <mnem:serverId>web-01</mnem:serverId>
-              <mnem:disks><mnem:disk path='/img/web-01.qcow2'/></mnem:disks>
+              <mnem:disks>
+                <mnem:disk path='/img/web-01.qcow2'/>
+                <mnem:disk path='/img/web-01-cache.qcow2'/>
+              </mnem:disks>
             </mnem:mnemosyne>
           </metadata>
           <memory unit='KiB'>2097152</memory>
@@ -228,6 +231,7 @@ public class XmlUtilTest {
     DomainState s = XmlUtil.getShortState(xml);
 
     assertThat(s.ownedPaths()).containsExactly("/img/web-01.qcow2");
+    assertThat(s.detachedOwned()).containsExactly("/img/web-01-cache.qcow2");
     assertThat(s.disks()).hasSize(2);
   }
 }

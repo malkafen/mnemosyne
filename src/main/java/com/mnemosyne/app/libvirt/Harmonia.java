@@ -508,7 +508,10 @@ public class Harmonia implements AutoCloseable {
         TargetDev.prefix(u.actual().disks().isEmpty() ? null : u.actual().disks().get(0).target());
 
     List<String> lines = new ArrayList<>();
+    // The whole record is rewritten, so the volumes detached by hand are carried over: they are
+    // still Mnemosyne's, and dropping them would make them vanish from the plan.
     List<String> owned = new ArrayList<>(u.actual().ownedPaths());
+    owned.addAll(u.actual().detachedOwned());
     for (Plan.DiskAttach attach : u.toAttach()) {
       ExtraDisk disk = attach.disk();
       List<String> free = TargetDev.allocate(prefix, used, 1);

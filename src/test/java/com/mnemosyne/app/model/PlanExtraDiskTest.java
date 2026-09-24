@@ -271,6 +271,31 @@ public class PlanExtraDiskTest {
   }
 
   @Test
+  void aRecordedVolumeDetachedByHand_isListedUnderTheDelete_andKeptEvenWithPurge() {
+    // Arrange
+    DomainState d =
+        new DomainState(
+            "old-db",
+            2,
+            2048,
+            "old-db",
+            "1",
+            "mnemosyne",
+            List.of(new DomainState.Disk("vda", IMAGES + "old-db.qcow2", null).markOwned()),
+            false,
+            false,
+            List.of(IMAGES + "old-db-cache.qcow2"));
+    // Act
+    Plan result = new Plan(List.of(d), Map.of(), false, true);
+    // Assert
+    assertThat(result.getToDelete().get("old-db")).containsExactly(IMAGES + "old-db.qcow2");
+    assertThat(result.getKept().get("old-db"))
+        .containsExactly(
+            IMAGES
+                + "old-db-cache.qcow2 - created by mnemosyne but no longer attached, left as is");
+  }
+
+  @Test
   void purgeDisks_takesEveryVolume_butStillNotOneAnotherDomainUses() {
     // Arrange: an adopted VM, nothing recorded as created by Mnemosyne
     DomainState d =

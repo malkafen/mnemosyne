@@ -13,6 +13,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.TreeMap;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 import lombok.Getter;
 
 @Getter
@@ -149,7 +150,8 @@ public final class Plan {
    * lines the plan prints for them.
    *
    * <p>A volume goes with the VM only when its metadata records it as created by Mnemosyne — or the
-   * run says {@code --purge-disks} — and no other domain uses it.
+   * run says {@code --purge-disks} — and no other domain uses it. A recorded volume that was
+   * detached by hand is listed too, and never deleted.
    */
   private final Map<String, List<String>> kept;
 
@@ -257,9 +259,16 @@ public final class Plan {
                 Collectors.toMap(
                     d -> d.name(),
                     d ->
-                        d.disks().stream()
-                            .filter(disk -> !deletable(d, disk, actual, purgeDisks))
-                            .map(disk -> keptLine(d, disk, actual))
+                        Stream.concat(
+                                d.disks().stream()
+                                    .filter(disk -> !deletable(d, disk, actual, purgeDisks))
+                                    .map(disk -> keptLine(d, disk, actual)),
+                                d.detachedOwned().stream()
+                                    .map(
+                                        p ->
+                                            p
+                                                + " - created by mnemosyne but no longer"
+                                                + " attached, left as is"))
                             .toList(),
                     (a, b) -> a,
                     TreeMap::new));

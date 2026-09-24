@@ -96,6 +96,8 @@ public class XmlUtil {
         owned.add(((Element) listed.item(i)).getAttribute("path"));
       List<Disk> disks =
           disks(doc).stream().map(d -> owned.contains(d.path()) ? d.markOwned() : d).toList();
+      List<String> attached = disks.stream().map(Disk::path).toList();
+      List<String> detached = owned.stream().filter(p -> !attached.contains(p)).toList();
 
       return new DomainState(
           name,
@@ -107,7 +109,8 @@ public class XmlUtil {
           textNS(meta, MNEM_NS, "managedBy"),
           disks,
           false,
-          false);
+          false,
+          detached);
     } catch (ParserConfigurationException | SAXException | IOException e) {
       throw new XmlParseException("Failed to parse domain XML", e);
     }

@@ -10,6 +10,10 @@ import java.util.Optional;
  * they are read from the domain handle and attached with {@link #withRuntime(boolean, boolean)}.
  * Disk capacities are not in the XML either and are filled in the same way, with {@link
  * #withDisks(List)}.
+ *
+ * <p>{@code detachedOwned} holds the volumes {@code <mnem:disks>} records as created by Mnemosyne
+ * that are no longer attached to the domain — detached by hand. They are never deleted with it, but
+ * they are still Mnemosyne's, so the record keeps them and the plan names them.
  */
 public record DomainState(
     String name,
@@ -20,7 +24,25 @@ public record DomainState(
     String managedBy,
     List<Disk> disks,
     boolean active,
-    boolean autostart) {
+    boolean autostart,
+    List<String> detachedOwned) {
+
+  /**
+   * A snapshot with no recorded volumes detached from the domain, which is every domain but one
+   * whose disk Mnemosyne created was later detached by hand.
+   */
+  public DomainState(
+      String name,
+      int cpu,
+      long ram,
+      String serverId,
+      String specVersion,
+      String managedBy,
+      List<Disk> disks,
+      boolean active,
+      boolean autostart) {
+    this(name, cpu, ram, serverId, specVersion, managedBy, disks, active, autostart, List.of());
+  }
 
   /**
    * One file-backed disk of the domain, in the order the domain XML lists it.
@@ -118,12 +140,21 @@ public record DomainState(
   /** The same snapshot with the power state and autostart flag filled in. */
   public DomainState withRuntime(boolean active, boolean autostart) {
     return new DomainState(
-        name, cpu, ram, serverId, specVersion, managedBy, disks, active, autostart);
+        name, cpu, ram, serverId, specVersion, managedBy, disks, active, autostart, detachedOwned);
   }
 
   /** The same snapshot carrying a different disk list, used to attach the capacities. */
   public DomainState withDisks(List<Disk> disks) {
     return new DomainState(
-        name, cpu, ram, serverId, specVersion, managedBy, List.copyOf(disks), active, autostart);
+        name,
+        cpu,
+        ram,
+        serverId,
+        specVersion,
+        managedBy,
+        List.copyOf(disks),
+        active,
+        autostart,
+        detachedOwned);
   }
 }
