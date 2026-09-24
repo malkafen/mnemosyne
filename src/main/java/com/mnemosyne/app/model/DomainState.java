@@ -36,11 +36,15 @@ public record DomainState(
    * size could not be read is left out of every size decision rather than being treated as empty
    * and grown to the inventory's figure.
    */
-  public record Disk(String target, String path, String serial, long capacityGiB) {
+  public record Disk(String target, String path, String serial, long capacityGiB, boolean owned) {
 
     /** A disk as the XML describes it, before its capacity has been read from the host. */
     public Disk(String target, String path, String serial) {
-      this(target, path, serial, CAPACITY_UNKNOWN);
+      this(target, path, serial, CAPACITY_UNKNOWN, false);
+    }
+
+    public Disk(String target, String path, String serial, long capacityGiB) {
+      this(target, path, serial, capacityGiB, false);
     }
 
     /** The volume's name inside its pool, which is what the inventory can predict. */
@@ -52,7 +56,12 @@ public record DomainState(
 
     /** The same disk with its capacity filled in. */
     public Disk withCapacity(long capacityGiB) {
-      return new Disk(target, path, serial, capacityGiB);
+      return new Disk(target, path, serial, capacityGiB, owned);
+    }
+
+    /** The same disk, marked as a volume Mnemosyne created (listed in {@code <mnem:disks>}). */
+    public Disk markOwned() {
+      return new Disk(target, path, serial, capacityGiB, true);
     }
 
     public boolean capacityKnown() {
@@ -96,9 +105,14 @@ public record DomainState(
     return disks.isEmpty() ? Optional.empty() : Optional.of(disks.get(0));
   }
 
-  /** Paths of every file-backed disk, which is what volume deletion works on. */
+  /** Paths of every file-backed disk. */
   public List<String> diskPaths() {
     return disks.stream().map(Disk::path).toList();
+  }
+
+  /** Paths of the volumes Mnemosyne created for this domain, as its metadata records them. */
+  public List<String> ownedPaths() {
+    return disks.stream().filter(Disk::owned).map(Disk::path).toList();
   }
 
   /** The same snapshot with the power state and autostart flag filled in. */

@@ -89,6 +89,14 @@ public class XmlUtil {
         return new DomainState(name, cpu, ram, null, null, null, disks(doc), false, false);
       }
 
+      // <mnem:disks> lists the volumes Mnemosyne created; only those go when the domain does.
+      Set<String> owned = new LinkedHashSet<>();
+      NodeList listed = meta.getElementsByTagNameNS(MNEM_NS, "disk");
+      for (int i = 0; i < listed.getLength(); i++)
+        owned.add(((Element) listed.item(i)).getAttribute("path"));
+      List<Disk> disks =
+          disks(doc).stream().map(d -> owned.contains(d.path()) ? d.markOwned() : d).toList();
+
       return new DomainState(
           name,
           cpu,
@@ -97,7 +105,7 @@ public class XmlUtil {
           // textNS(meta, MNEM_NS, "specHash"),
           textNS(meta, MNEM_NS, "specVersion"),
           textNS(meta, MNEM_NS, "managedBy"),
-          disks(doc),
+          disks,
           false,
           false);
     } catch (ParserConfigurationException | SAXException | IOException e) {

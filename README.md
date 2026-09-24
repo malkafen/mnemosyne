@@ -49,7 +49,9 @@ datasource served by a built-in HTTP server.
 5. The cloud-init server starts on port 8080 under `/cloud-init`, followed by a 10-second
    confirmation window (`Ctrl+C` aborts).
 6. Each group is reconciled in the order delete, update, create:
-   - **delete** destroys and undefines the domain, then deletes its file-backed volumes;
+   - **delete** destroys and undefines the domain, then deletes the volumes Mnemosyne created for
+     it (recorded in the domain's metadata) — with `--purge-disks`, every volume — skipping any
+     that another domain also uses;
    - **update** adds any missing extra disks first and grows the ones that are too small — a
      running domain through QEMU, so the guest sees the new size at once, a shut-down one through
      its volume in the pool — then changes vCPU count via libvirt and RAM by
@@ -126,6 +128,7 @@ Debian/Ubuntu, `/usr/lib64` on RHEL/Fedora, `/opt/homebrew/lib` on macOS.
 | `-p`, `--plan` | Print the plan and exit without applying | off |
 | `-j`, `--join` | Adopt matching unmanaged domains; create and delete nothing | off |
 | `--no-delete` | Keep managed domains that are absent from the inventory | off |
+| `--purge-disks` | When deleting a VM, also delete volumes Mnemosyne did not create — an adopted VM's disks, disks attached by hand. A volume another domain uses is still kept | off |
 | `--parallel <n>` | How many VMs of a group to apply at once | `1` |
 | `-v`, `--verbose` | Debug logging, including full stack traces | off |
 | `-h`, `--help`, `-V`, `--version` | Usage and version | — |
@@ -228,8 +231,8 @@ next run.
 | `size` increased | The disk is grown on the hypervisor, to the new size exactly. A running domain is resized through QEMU and the guest sees the new capacity immediately; a shut-down one has its volume resized in the pool and sees it at its next boot. **The partition and the filesystem inside the guest are not touched** — see below. |
 | `size` decreased | **Nothing, and the run stops.** Shrinking a disk destroys whatever sits past the new end, so the VM is listed as `blocked` with both sizes and nothing is applied, in any group, until the inventory says at least what the disk already is. |
 | `pool` changed on an existing disk | **Nothing.** Data is never moved between pools; the disk is reported as missing from the new pool and left where it is. |
-| A disk attached by hand, outside the inventory | Reported once, never touched. |
-| The VM removed from the inventory | Its extra disks are deleted along with its root disk. The plan lists every volume by path before the confirmation window, so nothing disappears unannounced — and `--no-delete` keeps all of them. |
+| A disk attached by hand, outside the inventory | Reported once, never touched — also when the VM is deleted, unless `--purge-disks` is given. |
+| The VM removed from the inventory | The volumes Mnemosyne created for it — root and extra disks, recorded in the domain's metadata — are deleted with it. Anything else stays and is listed under the delete as `left as is`: a volume attached by hand or belonging to an adopted VM (`--purge-disks` deletes those too), and always a volume that another domain also uses. The plan lists every volume by path before the confirmation window, so nothing disappears unannounced — and `--no-delete` keeps all of them. |
 
 ### Growing a disk
 

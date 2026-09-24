@@ -141,8 +141,17 @@ public final class Plan {
    */
   private final Map<String, Server> toCreate;
 
-  /** Managed domains absent from config, keyed by VM name, mapped to their disks to delete. */
+  /** Managed domains absent from config, keyed by VM name, mapped to the volumes to delete. */
   private final Map<String, List<String>> toDelete;
+
+  /**
+   * Volumes of the domains in {@link #toDelete} that stay in their pool, keyed by VM name, as the
+   * lines the plan prints for them.
+   *
+   * <p>A volume goes with the VM only when its metadata records it as created by Mnemosyne — or the
+   * run says {@code --purge-disks} — and no other domain uses it.
+   */
+  private final Map<String, List<String>> kept;
 
   /** Names of all unmanaged domains, including adoptable ones. */
   private final List<String> unmanaged;
@@ -171,6 +180,14 @@ public final class Plan {
   private final Map<String, List<DiskShrink>> shrinks;
 
   public Plan(List<DomainState> actual, Map<String, Server> servers, boolean deleteDisable) {
+    this(actual, servers, deleteDisable, false);
+  }
+
+  public Plan(
+      List<DomainState> actual,
+      Map<String, Server> servers,
+      boolean deleteDisable,
+      boolean purgeDisks) {
 
     HashMap<String, DomainState> managedD = new HashMap<>();
     HashMap<String, DomainState> unmanagedD = new HashMap<>();
@@ -218,13 +235,34 @@ public final class Plan {
             .collect(
                 Collectors.toMap(u -> u.actual().serverId(), u -> u, (a, b) -> a, TreeMap::new));
 
+    List<DomainState> gone =
+        deleteDisable
+            ? List.of()
+            : managedD.values().stream().filter(d -> !servers.containsKey(d.serverId())).toList();
     this.toDelete =
-        !deleteDisable
-            ? managedD.values().stream()
-                .filter(d -> !servers.containsKey(d.serverId()))
-                .collect(
-                    Collectors.toMap(d -> d.name(), d -> d.diskPaths(), (a, b) -> a, TreeMap::new))
-            : Map.of();
+        gone.stream()
+            .collect(
+                Collectors.toMap(
+                    d -> d.name(),
+                    d ->
+                        d.disks().stream()
+                            .filter(disk -> deletable(d, disk, actual, purgeDisks))
+                            .map(DomainState.Disk::path)
+                            .toList(),
+                    (a, b) -> a,
+                    TreeMap::new));
+    this.kept =
+        gone.stream()
+            .collect(
+                Collectors.toMap(
+                    d -> d.name(),
+                    d ->
+                        d.disks().stream()
+                            .filter(disk -> !deletable(d, disk, actual, purgeDisks))
+                            .map(disk -> keptLine(d, disk, actual))
+                            .toList(),
+                    (a, b) -> a,
+                    TreeMap::new));
 
     this.toAdopt =
         servers.entrySet().stream()
@@ -327,6 +365,26 @@ public final class Plan {
     return List.copyOf(attach);
   }
 
+  private static boolean deletable(
+      DomainState d, DomainState.Disk disk, List<DomainState> actual, boolean purgeDisks) {
+    return (disk.owned() || purgeDisks) && sharedWith(d, disk, actual).isEmpty();
+  }
+
+  /** Another domain the volume is attached to, which deleting it would pull the disk from under. */
+  private static Optional<String> sharedWith(
+      DomainState d, DomainState.Disk disk, List<DomainState> actual) {
+    return actual.stream()
+        .filter(o -> !d.name().equals(o.name()) && o.diskPaths().contains(disk.path()))
+        .map(DomainState::name)
+        .findFirst();
+  }
+
+  private static String keptLine(DomainState d, DomainState.Disk disk, List<DomainState> actual) {
+    return sharedWith(d, disk, actual)
+        .map(o -> String.format("%s - also attached to '%s', left as is", disk.path(), o))
+        .orElse(disk.path() + " - not created by mnemosyne, left as is (--purge-disks deletes it)");
+  }
+
   /**
    * Disks attached to the domain that the inventory does not describe.
    *
@@ -383,8 +441,9 @@ public final class Plan {
 
     toDelete.forEach(
         (n, disks) -> {
-          report.add("delete", "-", n, disks.isEmpty() ? "no disks" : "");
+          report.add("delete", "-", n, disks.isEmpty() && kept.get(n).isEmpty() ? "no disks" : "");
           report.sub(disks);
+          report.sub(kept.get(n));
         });
     toUpdate.forEach(
         (id, u) -> {

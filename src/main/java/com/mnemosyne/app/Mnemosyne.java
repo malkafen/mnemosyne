@@ -101,7 +101,9 @@ class Mnemosyne {
       Report.heading("Plan");
       Map<String, Preflight> blocked = new LinkedHashMap<>();
       for (Iris i : irides) {
-        Plan plan = i.harmonia.plan(i.mnemon().getServers(), config.isDeleteDisable());
+        Plan plan =
+            i.harmonia.plan(
+                i.mnemon().getServers(), config.isDeleteDisable(), config.isPurgeDisks());
         // Adoption creates nothing, so there is nothing to check and nothing to audit for it.
         Preflight preflight = config.isJoin() ? new Preflight() : i.harmonia.preflight();
         plan.print(i.mnemon.getGroup(), config.isJoin(), preflight);
