@@ -72,20 +72,23 @@ public class HarmoniaFailureTest {
     return out.toString(StandardCharsets.UTF_8);
   }
 
-  /** The shipped templates, which render; the fixture the reference test already guards. */
-  private static Templates shipped() {
+  /**
+   * Test fixtures from {@code src/test/resources}, independent of the user-editable {@code
+   * templates/}.
+   */
+  private static Templates fixtures() {
     Templates t = new Templates();
-    t.setServerTmpl("templates/server.xml");
-    t.setVolTmpl("templates/volume.xml");
-    t.setMetaDataTmpl("templates/meta-data.yml");
-    t.setUserDataTmpl("templates/user-data.yml");
-    t.setNetworkConfigTmpl("templates/network-config.yml");
+    t.setServerTmpl(HarmoniaFailureTest.class.getResource("/server-template.xml").getPath());
+    t.setVolTmpl(HarmoniaFailureTest.class.getResource("/volume.xml").getPath());
+    t.setMetaDataTmpl(HarmoniaFailureTest.class.getResource("/meta-data.yml").getPath());
+    t.setUserDataTmpl(HarmoniaFailureTest.class.getResource("/user-data.yml").getPath());
+    t.setNetworkConfigTmpl(HarmoniaFailureTest.class.getResource("/network-config.yml").getPath());
     return t;
   }
 
   /** The same templates, with the domain's {@code <interface>} dropped from the copy. */
   private Templates withoutInterface() throws IOException {
-    String xml = Files.readString(Path.of("templates/server.xml"), StandardCharsets.UTF_8);
+    String xml = Files.readString(Path.of(fixtures().getServerTmpl()), StandardCharsets.UTF_8);
     // Comments go first: the template documents the <interface> it fills in, and a comment
     // half-eaten by the next replacement would make the file unparseable for the wrong reason.
     String stripped =
@@ -95,7 +98,7 @@ public class HarmoniaFailureTest {
     Path copy = tmp.resolve("server-no-interface.xml");
     Files.writeString(copy, stripped, StandardCharsets.UTF_8);
 
-    Templates t = shipped();
+    Templates t = fixtures();
     t.setServerTmpl(copy.toString());
     return t;
   }
@@ -133,9 +136,9 @@ public class HarmoniaFailureTest {
     // Arrange
     host();
     Map<String, Server> servers = new LinkedHashMap<>();
-    servers.put("qa-a", server("qa-a", shipped()));
+    servers.put("qa-a", server("qa-a", fixtures()));
     servers.put("qa-b", server("qa-b", withoutInterface()));
-    servers.put("qa-c", server("qa-c", shipped()));
+    servers.put("qa-c", server("qa-c", fixtures()));
 
     Harmonia harmonia = new Harmonia("bm05", connect);
     // Act

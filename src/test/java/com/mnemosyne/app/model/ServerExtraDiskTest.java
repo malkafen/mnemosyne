@@ -26,7 +26,7 @@ public class ServerExtraDiskTest {
   private static Server server(String template, ExtraDisk... extras) {
     Templates t = new Templates();
     t.setServerTmpl(ServerExtraDiskTest.class.getResource("/" + template).getPath());
-    t.setVolTmpl("templates/volume.xml");
+    t.setVolTmpl(ServerExtraDiskTest.class.getResource("/volume.xml").getPath());
 
     Server s = new Server();
     s.setId("web-01.example.lan");

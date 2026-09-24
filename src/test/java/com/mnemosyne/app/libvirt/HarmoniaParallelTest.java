@@ -71,13 +71,13 @@ public class HarmoniaParallelTest {
     return out.toString(StandardCharsets.UTF_8);
   }
 
-  private static Templates shipped() {
+  private static Templates fixtures() {
     Templates t = new Templates();
-    t.setServerTmpl("templates/server.xml");
-    t.setVolTmpl("templates/volume.xml");
-    t.setMetaDataTmpl("templates/meta-data.yml");
-    t.setUserDataTmpl("templates/user-data.yml");
-    t.setNetworkConfigTmpl("templates/network-config.yml");
+    t.setServerTmpl(HarmoniaParallelTest.class.getResource("/server-template.xml").getPath());
+    t.setVolTmpl(HarmoniaParallelTest.class.getResource("/volume.xml").getPath());
+    t.setMetaDataTmpl(HarmoniaParallelTest.class.getResource("/meta-data.yml").getPath());
+    t.setUserDataTmpl(HarmoniaParallelTest.class.getResource("/user-data.yml").getPath());
+    t.setNetworkConfigTmpl(HarmoniaParallelTest.class.getResource("/network-config.yml").getPath());
     return t;
   }
 
@@ -93,7 +93,7 @@ public class HarmoniaParallelTest {
     s.setGateway("192.168.17.1");
     s.setVolLookup("debian-13-genericcloud.qcow2");
     s.setMetaUrl("http://192.0.2.5:8080/cloud-init/");
-    s.setTemplates(shipped());
+    s.setTemplates(fixtures());
     return s;
   }
 
