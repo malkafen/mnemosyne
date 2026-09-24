@@ -219,8 +219,8 @@ public class PlanExtraDiskTest {
             "1",
             "mnemosyne",
             List.of(
-                new DomainState.Disk("vda", IMAGES + "old-db.qcow2", null),
-                new DomainState.Disk("vdb", IMAGES + "old-db-data.qcow2", "data")),
+                new DomainState.Disk("vda", IMAGES + "old-db.qcow2", null).markOwned(),
+                new DomainState.Disk("vdb", IMAGES + "old-db-data.qcow2", "data").markOwned()),
             false,
             false);
     // Act
@@ -228,6 +228,107 @@ public class PlanExtraDiskTest {
     // Assert
     assertThat(result.getToDelete().get("old-db"))
         .containsExactly(IMAGES + "old-db.qcow2", IMAGES + "old-db-data.qcow2");
+  }
+
+  @Test
+  void deletingAVmLeavesVolumesItDidNotCreate_andOnesAnotherDomainUses() {
+    // Arrange
+    DomainState d =
+        new DomainState(
+            "old-db",
+            2,
+            2048,
+            "old-db",
+            "1",
+            "mnemosyne",
+            List.of(
+                new DomainState.Disk("vda", IMAGES + "old-db.qcow2", null).markOwned(),
+                new DomainState.Disk("vdb", IMAGES + "handmade.qcow2", null),
+                new DomainState.Disk("vdc", IMAGES + "shared.raw", null).markOwned()),
+            false,
+            false);
+    DomainState other =
+        new DomainState(
+            "legacy",
+            1,
+            1024,
+            null,
+            null,
+            null,
+            List.of(new DomainState.Disk("vda", IMAGES + "shared.raw", null)),
+            false,
+            false);
+    // Act
+    Plan result = new Plan(List.of(d, other), Map.of(), false);
+    // Assert
+    assertThat(result.getToDelete().get("old-db")).containsExactly(IMAGES + "old-db.qcow2");
+    assertThat(result.getKept().get("old-db"))
+        .containsExactly(
+            IMAGES
+                + "handmade.qcow2"
+                + " - not created by mnemosyne, left as is (--purge-disks deletes it)",
+            IMAGES + "shared.raw - also attached to 'legacy', left as is");
+  }
+
+  @Test
+  void aRecordedVolumeDetachedByHand_isListedUnderTheDelete_andKeptEvenWithPurge() {
+    // Arrange
+    DomainState d =
+        new DomainState(
+            "old-db",
+            2,
+            2048,
+            "old-db",
+            "1",
+            "mnemosyne",
+            List.of(new DomainState.Disk("vda", IMAGES + "old-db.qcow2", null).markOwned()),
+            false,
+            false,
+            List.of(IMAGES + "old-db-cache.qcow2"));
+    // Act
+    Plan result = new Plan(List.of(d), Map.of(), false, true);
+    // Assert
+    assertThat(result.getToDelete().get("old-db")).containsExactly(IMAGES + "old-db.qcow2");
+    assertThat(result.getKept().get("old-db"))
+        .containsExactly(
+            IMAGES
+                + "old-db-cache.qcow2 - created by mnemosyne but no longer attached, left as is");
+  }
+
+  @Test
+  void purgeDisks_takesEveryVolume_butStillNotOneAnotherDomainUses() {
+    // Arrange: an adopted VM, nothing recorded as created by Mnemosyne
+    DomainState d =
+        new DomainState(
+            "legacy-01",
+            1,
+            1024,
+            "legacy-01",
+            "1",
+            "mnemosyne",
+            List.of(
+                new DomainState.Disk("vda", IMAGES + "legacy-01-disk0.img", null),
+                new DomainState.Disk("vdb", IMAGES + "shared.raw", null)),
+            false,
+            false);
+    DomainState other =
+        new DomainState(
+            "legacy-02",
+            1,
+            1024,
+            null,
+            null,
+            null,
+            List.of(new DomainState.Disk("vda", IMAGES + "shared.raw", null)),
+            false,
+            false);
+    // Act
+    Plan result = new Plan(List.of(d, other), Map.of(), false, true);
+    // Assert
+    assertThat(result.getToDelete().get("legacy-01"))
+        .containsExactly(IMAGES + "legacy-01-disk0.img");
+    assertThat(result.getKept().get("legacy-01"))
+        .containsExactly(IMAGES + "shared.raw - also attached to 'legacy-02', left as is");
   }
 
   @Test

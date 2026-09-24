@@ -110,8 +110,13 @@ public class Harmonia implements AutoCloseable {
   }
 
   public Plan plan(Map<String, Server> servers, boolean deleteDisable) throws LibvirtException {
+    return plan(servers, deleteDisable, false);
+  }
+
+  public Plan plan(Map<String, Server> servers, boolean deleteDisable, boolean purgeDisks)
+      throws LibvirtException {
     this.actual = withDiskCapacities(domainOps.readActualState());
-    this.plan = new Plan(this.actual, servers, deleteDisable);
+    this.plan = new Plan(this.actual, servers, deleteDisable, purgeDisks);
     return this.plan;
   }
 
@@ -278,7 +283,8 @@ public class Harmonia implements AutoCloseable {
   }
 
   private void joinOne(Server s, Report report) {
-    if (domainOps.joinDomain(s.getName(), s.buildMnemosyneMetadataXml()))
+    // An adopted VM's volumes were not created by Mnemosyne: none are recorded as its own.
+    if (domainOps.joinDomain(s.getName(), s.buildMnemosyneMetadataXml(List.of())))
       report.add("join", "+", s.getId(), "");
     else {
       log.debug("[ {} ] join failed for '{}'", group, s.getId());
@@ -436,8 +442,10 @@ public class Harmonia implements AutoCloseable {
       domainOps.destroyDomain(name);
       domainOps.undefineDomain(name);
       storageOps.deleteVolumes(diskPaths, name);
-      report.add("delete", "-", name, diskPaths.isEmpty() ? "no disks" : "");
+      List<String> kept = plan.getKept().get(name);
+      report.add("delete", "-", name, diskPaths.isEmpty() && kept.isEmpty() ? "no disks" : "");
       report.sub(diskPaths);
+      report.sub(kept);
     } catch (LibvirtException | RuntimeException e) {
       log.debug("[ {} ] delete failed for '{}'", group, name, e);
       report.skip(name, "delete failed: " + cause(e));
@@ -500,6 +508,10 @@ public class Harmonia implements AutoCloseable {
         TargetDev.prefix(u.actual().disks().isEmpty() ? null : u.actual().disks().get(0).target());
 
     List<String> lines = new ArrayList<>();
+    // The whole record is rewritten, so the volumes detached by hand are carried over: they are
+    // still Mnemosyne's, and dropping them would make them vanish from the plan.
+    List<String> owned = new ArrayList<>(u.actual().ownedPaths());
+    owned.addAll(u.actual().detachedOwned());
     for (Plan.DiskAttach attach : u.toAttach()) {
       ExtraDisk disk = attach.disk();
       List<String> free = TargetDev.allocate(prefix, used, 1);
@@ -515,6 +527,13 @@ public class Harmonia implements AutoCloseable {
           storageOps.provisionBlankVolume(
               VolumeSpec.blank(
                   disk.volName(s.getName()), disk.getPool(), s.buildExtraVolumeXml(disk)));
+
+      // Recorded before the attach: a failed attach is retried with this same volume next run,
+      // and a volume that was never recorded would be left behind when the VM is deleted.
+      if (!owned.contains(volume.path())) {
+        owned.add(volume.path());
+        domainOps.writeMetadata(name, s.buildMnemosyneMetadataXml(owned));
+      }
 
       boolean hotPlugged =
           domainOps.attachDisk(name, s.buildExtraDiskXml(disk, target, volume.path()), live);

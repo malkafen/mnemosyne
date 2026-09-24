@@ -13,6 +13,8 @@
     <memory>                        RAM; both the value and unit='KiB' are rewritten
     <vcpu>                          vCPU count
     <mnem:serverId>                 the inventory key Mnemosyne matches domains on
+    <mnem:disks>                    added: one <mnem:disk path=…/> per volume Mnemosyne creates;
+                                    only these are deleted with the VM
     <entry name='serial'>           cloud-init NoCloud datasource URL
     <disk device='disk'>/<source>   @file — path of the cloned volume (first such disk)
     <interface>/<source>            @network — libvirt network name (first interface)

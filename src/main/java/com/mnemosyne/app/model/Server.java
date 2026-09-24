@@ -202,6 +202,7 @@ public class Server {
     XmlUtil.setMemory(doc, "memory", this.ram);
     setElementText(doc, tmpl, "vcpu", String.valueOf(this.cpu));
     setElementTextNS(doc, "https://mnemosyne.dev/schema/v1", "serverId", getId());
+    appendOwnedDisks(doc);
     setCloudInitSerial(doc);
     setDiskSource(doc);
     appendExtraDisks(doc);
@@ -209,14 +210,44 @@ public class Server {
     return documentToString(doc);
   }
 
-  public String buildMnemosyneMetadataXml() {
+  /**
+   * The whole {@code <mnem:mnemosyne>} element, for {@code setMetadata}, which replaces it rather
+   * than merging. {@code ownedPaths} are the volumes Mnemosyne created: none for an adopted VM.
+   */
+  public String buildMnemosyneMetadataXml(List<String> ownedPaths) {
+    StringBuilder disks = new StringBuilder();
+    for (String p : ownedPaths) disks.append(String.format("<disk path='%s'/>", p));
     return String.format(
         "<mnemosyne>"
             + "<managedBy>mnemosyne</managedBy>"
             + "<serverId>%s</serverId>"
             + "<specVersion>1</specVersion>"
+            + "<disks>%s</disks>"
             + "</mnemosyne>",
-        getId());
+        getId(), disks);
+  }
+
+  /**
+   * Records every volume this VM is created with in {@code <mnem:disks>}, next to {@code serverId}.
+   * Built here rather than taken from the template, so a customised template needs no new element.
+   */
+  private void appendOwnedDisks(Document doc) {
+    String ns = "https://mnemosyne.dev/schema/v1";
+    Node meta = doc.getElementsByTagNameNS(ns, "serverId").item(0).getParentNode();
+    Element disks = doc.createElementNS(ns, "mnem:disks");
+    for (String path : ownedPaths()) {
+      Element disk = doc.createElementNS(ns, "mnem:disk");
+      disk.setAttribute("path", path);
+      disks.appendChild(disk);
+    }
+    meta.appendChild(disks);
+  }
+
+  private List<String> ownedPaths() {
+    List<String> paths = new java.util.ArrayList<>();
+    if (this.volPath != null) paths.add(this.volPath);
+    paths.addAll(this.extraVolPaths.values());
+    return paths;
   }
 
   private void setElementTextNS(Document doc, String namespaceUri, String localName, String value) {

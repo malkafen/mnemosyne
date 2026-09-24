@@ -51,6 +51,13 @@ public class Config {
       description = "Skip deletion of managed domains absent from the inventory.")
   private boolean deleteDisable = false;
 
+  @Option(
+      names = "--purge-disks",
+      description =
+          "When deleting a VM, also delete volumes Mnemosyne did not create (adopted VMs, disks"
+              + " attached by hand), unless another domain uses them.")
+  private boolean purgeDisks = false;
+
   /**
    * How many VMs of one group are applied at once.
    *

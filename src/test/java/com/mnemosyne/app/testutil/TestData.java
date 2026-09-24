@@ -23,8 +23,8 @@ public final class TestData {
   /** The same disks as {@link #DISKPATHS}, as a domain reports them. */
   public static final List<DomainState.Disk> DISKS =
       List.of(
-          new DomainState.Disk("vda", DISKPATHS.get(0), null),
-          new DomainState.Disk("vdb", DISKPATHS.get(1), null));
+          new DomainState.Disk("vda", DISKPATHS.get(0), null).markOwned(),
+          new DomainState.Disk("vdb", DISKPATHS.get(1), null).markOwned());
 
   private static Server ServerFactory(String name) {
     Server s = new Server();

@@ -283,23 +283,28 @@ class DomainOps {
   }
 
   boolean joinDomain(String name, String metadata) {
-    Domain d = null;
     try {
-      d = connect.domainLookupByName(name);
-
-      int flags =
-          (d.isActive() == 1)
-              ? Domain.ModificationImpact.CONFIG | Domain.ModificationImpact.LIVE
-              : Domain.ModificationImpact.CONFIG;
-
-      d.setMetadata(Domain.MetadataType.ELEMENT, metadata, "mnem", XmlUtil.MNEM_NS, flags);
-
+      writeMetadata(name, metadata);
       return true;
     } catch (LibvirtException e) {
       log.debug("Failed to join domain '{}'", name, e);
       return false;
+    }
+  }
+
+  /**
+   * Replaces the domain's {@code <mnem:mnemosyne>} element, in the live definition too if running.
+   */
+  void writeMetadata(String name, String metadata) throws LibvirtException {
+    Domain d = connect.domainLookupByName(name);
+    try {
+      int flags =
+          (d.isActive() == 1)
+              ? Domain.ModificationImpact.CONFIG | Domain.ModificationImpact.LIVE
+              : Domain.ModificationImpact.CONFIG;
+      d.setMetadata(Domain.MetadataType.ELEMENT, metadata, "mnem", XmlUtil.MNEM_NS, flags);
     } finally {
-      if (d != null) freeDomainQuietly(d);
+      freeDomainQuietly(d);
     }
   }
 
