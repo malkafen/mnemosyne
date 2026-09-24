@@ -199,8 +199,22 @@ class Mnemosyne {
 
   private List<Mnemon> loadAndValidate(Config config) throws Exception {
     List<Mnemon> loaded = Mnemon.loadMnemones(config);
+    // Deletion is scoped to the host, not the group: two groups on one host:port would each delete
+    // the other's VMs as absent from the inventory.
+    Map<String, String> targets = new LinkedHashMap<>();
     for (Mnemon m : loaded) {
       validateMnemone(m);
+      String target = m.getHost() + ":" + m.getPort();
+      String other = targets.putIfAbsent(target, m.getGroup());
+      if (other != null)
+        throw new IllegalArgumentException(
+            "Groups '"
+                + other
+                + "' and '"
+                + m.getGroup()
+                + "' both target "
+                + target
+                + "; each would delete the other's VMs. Merge them into one group.");
     }
     return loaded;
   }
