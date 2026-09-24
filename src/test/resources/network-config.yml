@@ -1,0 +1,14 @@
+---
+version: 2
+ethernets:
+  vif0:
+    match:
+      name: enp1*
+    set-name: vif0
+    addresses:
+      - 192.0.2.50/255.255.255.0
+    gateway4: 192.0.2.1
+    nameservers:
+      addresses:
+        - 8.8.8.8
+        - 1.1.1.1
