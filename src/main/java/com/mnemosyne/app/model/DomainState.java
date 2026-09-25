@@ -14,6 +14,13 @@ import java.util.Optional;
  * <p>{@code detachedOwned} holds the volumes {@code <mnem:disks>} records as created by Mnemosyne
  * that are no longer attached to the domain — detached by hand. They are never deleted with it, but
  * they are still Mnemosyne's, so the record keeps them and the plan names them.
+ *
+ * <p>{@code reusedPaths} holds every volume {@code <mnem:reused-disks>} records: found in the pool
+ * when Mnemosyne asked for it, attached, and never created by Mnemosyne. Such a volume is never
+ * owned, so it is never deleted with the domain, attached or not. *
+ *
+ * <p>{@code init} is the {@code <mnem:init>} marker, or null when a domain carries none. The
+ * shorter constructors, for snapshots built in code, assume a finished initialization.
  */
 public record DomainState(
     String name,
@@ -25,7 +32,63 @@ public record DomainState(
     List<Disk> disks,
     boolean active,
     boolean autostart,
-    List<String> detachedOwned) {
+    List<String> detachedOwned,
+    List<String> reusedPaths,
+    InitMarker init) {
+
+  /** A snapshot whose initialization is not in question. */
+  public DomainState(
+      String name,
+      int cpu,
+      long ram,
+      String serverId,
+      String specVersion,
+      String managedBy,
+      List<Disk> disks,
+      boolean active,
+      boolean autostart,
+      List<String> detachedOwned,
+      List<String> reusedPaths) {
+    this(
+        name,
+        cpu,
+        ram,
+        serverId,
+        specVersion,
+        managedBy,
+        disks,
+        active,
+        autostart,
+        detachedOwned,
+        reusedPaths,
+        InitMarker.ASSUMED_FINISHED);
+  }
+
+  /** A snapshot with no volumes recorded as reused. */
+  public DomainState(
+      String name,
+      int cpu,
+      long ram,
+      String serverId,
+      String specVersion,
+      String managedBy,
+      List<Disk> disks,
+      boolean active,
+      boolean autostart,
+      List<String> detachedOwned) {
+    this(
+        name,
+        cpu,
+        ram,
+        serverId,
+        specVersion,
+        managedBy,
+        disks,
+        active,
+        autostart,
+        detachedOwned,
+        List.of());
+  }
 
   /**
    * A snapshot with no recorded volumes detached from the domain, which is every domain but one
@@ -137,10 +200,32 @@ public record DomainState(
     return disks.stream().filter(Disk::owned).map(Disk::path).toList();
   }
 
+  /** Whether the metadata records this volume as found in the pool rather than created. */
+  public boolean reused(String path) {
+    return reusedPaths.contains(path);
+  }
+
+  /** Recorded reused volumes that are no longer attached to the domain. */
+  public List<String> detachedReused() {
+    List<String> attached = diskPaths();
+    return reusedPaths.stream().filter(p -> !attached.contains(p)).toList();
+  }
+
   /** The same snapshot with the power state and autostart flag filled in. */
   public DomainState withRuntime(boolean active, boolean autostart) {
     return new DomainState(
-        name, cpu, ram, serverId, specVersion, managedBy, disks, active, autostart, detachedOwned);
+        name,
+        cpu,
+        ram,
+        serverId,
+        specVersion,
+        managedBy,
+        disks,
+        active,
+        autostart,
+        detachedOwned,
+        reusedPaths,
+        init);
   }
 
   /** The same snapshot carrying a different disk list, used to attach the capacities. */
@@ -155,6 +240,8 @@ public record DomainState(
         List.copyOf(disks),
         active,
         autostart,
-        detachedOwned);
+        detachedOwned,
+        reusedPaths,
+        init);
   }
 }

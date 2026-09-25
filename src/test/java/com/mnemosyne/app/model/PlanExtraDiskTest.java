@@ -296,6 +296,36 @@ public class PlanExtraDiskTest {
   }
 
   @Test
+  void deletingAVmLeavesTheVolumesItReused_attachedOrNot_andSaysSo() {
+    // Arrange
+    DomainState d =
+        new DomainState(
+            "old-db",
+            2,
+            2048,
+            "old-db",
+            "1",
+            "mnemosyne",
+            List.of(
+                new DomainState.Disk("vda", IMAGES + "old-db.qcow2", null).markOwned(),
+                new DomainState.Disk("vdb", IMAGES + "old-db-data.qcow2", "data")),
+            false,
+            false,
+            List.of(),
+            List.of(IMAGES + "old-db-data.qcow2", IMAGES + "old-db-cache.qcow2"));
+    // Act
+    Plan result = new Plan(List.of(d), Map.of(), false);
+    // Assert
+    assertThat(result.getToDelete().get("old-db")).containsExactly(IMAGES + "old-db.qcow2");
+    assertThat(result.getKept().get("old-db"))
+        .containsExactly(
+            IMAGES
+                + "old-db-data.qcow2 - found in the pool and reused by mnemosyne, not created by"
+                + " it, left as is (--purge-disks deletes it)",
+            IMAGES + "old-db-cache.qcow2 - reused by mnemosyne, no longer attached, left as is");
+  }
+
+  @Test
   void purgeDisks_takesEveryVolume_butStillNotOneAnotherDomainUses() {
     // Arrange: an adopted VM, nothing recorded as created by Mnemosyne
     DomainState d =

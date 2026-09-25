@@ -111,7 +111,14 @@ class Mnemosyne {
       }
       if (!blocked.isEmpty()) stop(blocked.size());
 
-      if (config.isPlanOnly()) return EXIT_OK;
+      if (config.isPlanOnly()) {
+        List<String> initPending = pendingInit();
+        if (initPending.isEmpty()) return EXIT_OK;
+        System.out.printf(
+            "%d server(s) never finished initialization: %s.%n",
+            initPending.size(), String.join(", ", initPending));
+        return EXIT_INCOMPLETE;
+      }
       CloudInitServer.start();
       confirmWindow();
 
@@ -154,7 +161,8 @@ class Mnemosyne {
   private int outcome(boolean cloudInitOk) {
     int skipped = irides.stream().mapToInt(i -> i.harmonia().failures()).sum();
     List<String> pending = CloudInitServer.unfinished();
-    if (skipped == 0 && cloudInitOk && pending.isEmpty()) return EXIT_OK;
+    List<String> initPending = pendingInit();
+    if (skipped == 0 && cloudInitOk && pending.isEmpty() && initPending.isEmpty()) return EXIT_OK;
 
     StringJoiner why = new StringJoiner(", ");
     if (skipped > 0) why.add(skipped + " entr" + (skipped == 1 ? "y" : "ies") + " skipped");
@@ -164,9 +172,23 @@ class Mnemosyne {
               "cloud-init did not finish on %d server(s): %s",
               pending.size(), String.join(", ", pending)));
     else if (!cloudInitOk) why.add("the wait for cloud-init did not complete");
+    if (!initPending.isEmpty())
+      why.add(
+          String.format(
+              "%d existing server(s) never finished initialization: %s",
+              initPending.size(), String.join(", ", initPending)));
 
     System.out.printf("%nRun finished incomplete: %s.%n", why);
     return EXIT_INCOMPLETE;
+  }
+
+  /**
+   * Inventory VMs found with {@code <mnem:init state='pending'>}: created by an earlier run whose
+   * cloud-init never confirmed. They are left alone, but a run that has them has not put the
+   * inventory on the host, and its exit code says so — {@code --plan} included.
+   */
+  private List<String> pendingInit() {
+    return irides.stream().flatMap(i -> i.harmonia().pendingInit().stream()).sorted().toList();
   }
 
   /**

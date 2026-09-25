@@ -3,6 +3,7 @@ package com.mnemosyne.app.utils;
 import com.mnemosyne.app.exception.*;
 import com.mnemosyne.app.model.DomainState;
 import com.mnemosyne.app.model.DomainState.Disk;
+import com.mnemosyne.app.model.InitMarker;
 import java.io.IOException;
 import java.io.StringReader;
 import java.io.StringWriter;
@@ -86,14 +87,17 @@ public class XmlUtil {
 
       Element meta = firstNS(doc, MNEM_NS, "mnemosyne");
       if (meta == null) {
-        return new DomainState(name, cpu, ram, null, null, null, disks(doc), false, false);
+        return new DomainState(
+            name, cpu, ram, null, null, null, disks(doc), false, false, List.of(), List.of(), null);
       }
 
       // <mnem:disks> lists the volumes Mnemosyne created; only those go when the domain does.
-      Set<String> owned = new LinkedHashSet<>();
-      NodeList listed = meta.getElementsByTagNameNS(MNEM_NS, "disk");
-      for (int i = 0; i < listed.getLength(); i++)
-        owned.add(((Element) listed.item(i)).getAttribute("path"));
+      Set<String> owned = paths(meta, "disk");
+      // <mnem:reused-disks> lists the volumes it found in the pool and attached. A path on both
+      // lists is taken as reused: of the two mistakes, keeping a volume is the one that can be
+      // undone.
+      Set<String> reused = paths(meta, "volume");
+      owned.removeAll(reused);
       List<Disk> disks =
           disks(doc).stream().map(d -> owned.contains(d.path()) ? d.markOwned() : d).toList();
       List<String> attached = disks.stream().map(Disk::path).toList();
@@ -110,10 +114,39 @@ public class XmlUtil {
           disks,
           false,
           false,
-          detached);
+          detached,
+          List.copyOf(reused),
+          init(meta));
     } catch (ParserConfigurationException | SAXException | IOException e) {
       throw new XmlParseException("Failed to parse domain XML", e);
     }
+  }
+
+  /**
+   * The {@code <mnem:init>} marker as the metadata holds it, or null when there is none. Nothing is
+   * validated here: an unknown state is the plan's to refuse, and it can only name it if it gets
+   * it.
+   */
+  private static InitMarker init(Element meta) {
+    NodeList nodes = meta.getElementsByTagNameNS(MNEM_NS, "init");
+    if (nodes.getLength() == 0) return null;
+    Element e = (Element) nodes.item(0);
+    return new InitMarker(
+        attr(e, "state"), attr(e, "token"), attr(e, "created"), attr(e, "finished"));
+  }
+
+  /** An attribute's value, or null when it is absent — DOM itself answers with an empty string. */
+  private static String attr(Element e, String name) {
+    return e.hasAttribute(name) ? e.getAttribute(name) : null;
+  }
+
+  /** The {@code path} attributes of every {@code <mnem:tag>} under the metadata element. */
+  private static Set<String> paths(Element meta, String tag) {
+    Set<String> paths = new LinkedHashSet<>();
+    NodeList listed = meta.getElementsByTagNameNS(MNEM_NS, tag);
+    for (int i = 0; i < listed.getLength(); i++)
+      paths.add(((Element) listed.item(i)).getAttribute("path"));
+    return paths;
   }
 
   /**

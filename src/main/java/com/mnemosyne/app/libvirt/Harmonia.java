@@ -7,12 +7,14 @@ import com.mnemosyne.app.libvirt.StorageOps.Provisioned;
 import com.mnemosyne.app.libvirt.StorageOps.VolumeSpec;
 import com.mnemosyne.app.model.DomainState;
 import com.mnemosyne.app.model.ExtraDisk;
+import com.mnemosyne.app.model.InitMarker;
 import com.mnemosyne.app.model.Plan;
 import com.mnemosyne.app.model.Preflight;
 import com.mnemosyne.app.model.Server;
 import com.mnemosyne.app.output.Report;
 import com.mnemosyne.app.utils.TargetDev;
 import java.io.IOException;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.LinkedHashMap;
@@ -170,6 +172,7 @@ public class Harmonia implements AutoCloseable {
       return preflight;
     }
     refuseShrinks(preflight);
+    refuseUnknownInit(preflight);
 
     List<Server> creating = List.copyOf(this.plan.getToCreate().values());
     List<Plan.Update> attaching =
@@ -245,6 +248,24 @@ public class Harmonia implements AutoCloseable {
    * <p>Costs nothing over the wire. The sizes were read when the snapshot was taken, and the
    * comparison was done by the plan.
    */
+  /** A managed VM whose initialization cannot be told stops the run; nothing is guessed. */
+  private void refuseUnknownInit(Preflight preflight) {
+    this.plan
+        .getUnknownInit()
+        .forEach(
+            (id, reason) ->
+                preflight.add(
+                    new Preflight.Problem(
+                        "domain '" + id + "'",
+                        reason + " - fix it with 'virsh metadata' or remove the domain by hand"),
+                    id));
+  }
+
+  /** Inventory VMs whose initialization never finished; each one makes the run incomplete. */
+  public List<String> pendingInit() {
+    return this.plan == null ? List.of() : List.copyOf(this.plan.getPendingInit().keySet());
+  }
+
   private void refuseShrinks(Preflight preflight) {
     this.plan
         .getShrinks()
@@ -284,8 +305,9 @@ public class Harmonia implements AutoCloseable {
 
   private void joinOne(Server s, Report report) {
     // An adopted VM's volumes were not created by Mnemosyne: none are recorded as its own.
-    if (domainOps.joinDomain(s.getName(), s.buildMnemosyneMetadataXml(List.of())))
-      report.add("join", "+", s.getId(), "");
+    String metadata =
+        s.buildMnemosyneMetadataXml(List.of(), List.of(), InitMarker.adopted(Instant.now()));
+    if (domainOps.joinDomain(s.getName(), metadata)) report.add("join", "+", s.getId(), "");
     else {
       log.debug("[ {} ] join failed for '{}'", group, s.getId());
       report.skip(s.getId(), "join failed (run with -v for details)");
@@ -509,9 +531,11 @@ public class Harmonia implements AutoCloseable {
 
     List<String> lines = new ArrayList<>();
     // The whole record is rewritten, so the volumes detached by hand are carried over: they are
-    // still Mnemosyne's, and dropping them would make them vanish from the plan.
+    // still Mnemosyne's, and dropping them would make them vanish from the plan. The reused list
+    // is carried over whole for the same reason.
     List<String> owned = new ArrayList<>(u.actual().ownedPaths());
     owned.addAll(u.actual().detachedOwned());
+    List<String> reused = new ArrayList<>(u.actual().reusedPaths());
     for (Plan.DiskAttach attach : u.toAttach()) {
       ExtraDisk disk = attach.disk();
       List<String> free = TargetDev.allocate(prefix, used, 1);
@@ -529,10 +553,13 @@ public class Harmonia implements AutoCloseable {
                   disk.volName(s.getName()), disk.getPool(), s.buildExtraVolumeXml(disk)));
 
       // Recorded before the attach: a failed attach is retried with this same volume next run,
-      // and a volume that was never recorded would be left behind when the VM is deleted.
-      if (!owned.contains(volume.path())) {
-        owned.add(volume.path());
-        domainOps.writeMetadata(name, s.buildMnemosyneMetadataXml(owned));
+      // and a volume that was never recorded would be left behind when the VM is deleted. A volume
+      // already on either list keeps its place: the retry finds the volume this VM created last
+      // time, and that one is still its own.
+      if (!owned.contains(volume.path()) && !reused.contains(volume.path())) {
+        (volume.reused() ? reused : owned).add(volume.path());
+        domainOps.writeMetadata(
+            name, s.buildMnemosyneMetadataXml(owned, reused, u.actual().init()));
       }
 
       boolean hotPlugged =
@@ -604,7 +631,7 @@ public class Harmonia implements AutoCloseable {
     // The size is already on the update line; what this adds is the target the disk really got,
     // which may differ from the plan's guess, plus whatever the operator has to know about it.
     sb.append(String.format("%s %s in pool '%s'", target, disk.getName(), disk.getPool()));
-    if (volume.reused()) sb.append(" (reused existing volume)");
+    if (volume.reused()) sb.append(" (").append(REUSED_NOTE).append(")");
     // "power cycle", not "restart": a device that only made it into the persistent config appears
     // when the domain is stopped and started again. A reboot from inside the guest keeps the same
     // QEMU process, and therefore the same devices it was launched with, so it changes nothing.
@@ -621,19 +648,39 @@ public class Harmonia implements AutoCloseable {
     return (u.cpuChanged() || u.ramChanged()) && staysUp ? ", applies after restart" : "";
   }
 
+  /**
+   * What the report says about a volume that was already in the pool. It is attached as it is, and
+   * recorded as reused rather than created, so deleting the VM leaves it behind.
+   */
+  private static final String REUSED_NOTE =
+      "reused existing volume - not created by mnemosyne, kept when the VM is deleted";
+
   private void createOne(Server s, Report report) {
+    // The volumes this attempt created, as opposed to found: the only ones a failure may take back.
+    List<String> created = new ArrayList<>();
     try {
       VolumeSpec volSpec =
           new VolumeSpec(
               s.getVolName(), s.getPool(), s.buildVolumeXml(), s.getVolLookup(), s.getDisk());
-      s.setVolPath(storageOps.provisionVolume(volSpec));
+      // A fresh marker, with a fresh token, for every attempt: the domain is defined with it
+      // already pending, and the token is how its phone_home is told from anybody else's.
+      s.setInit(InitMarker.pending(Instant.now()));
+      Provisioned root = storageOps.provisionVolume(volSpec);
+      s.setVolPath(root.path());
+      List<String> diskLines = new ArrayList<>();
+      if (root.reused()) {
+        s.getReusedVolPaths().add(root.path());
+        diskLines.add(String.format("root %s (%s)", root.path(), REUSED_NOTE));
+      } else {
+        created.add(root.path());
+      }
       // Every disk must exist before the domain XML is built: the XML points at their paths.
-      List<String> diskLines = createExtraVolumes(s);
+      diskLines.addAll(createExtraVolumes(s, created));
       // A new VM always boots once so cloud-init can configure it; launch:false is honoured
       // afterwards, in settle().
       DomainSpec domainSpec =
           new DomainSpec(s.getName(), s.buildServerXml(), true, s.getAutostart());
-      CloudInitServer.register(s.buildSeed());
+      CloudInitServer.register(s.buildSeed(), () -> confirmInit(s));
       domainOps.setupDomain(domainSpec);
       if (!s.isLaunch()) toSettle.add(s.getId());
       report.add("create", "+", s.getId(), s.isLaunch() ? "" : "off after init");
@@ -645,18 +692,65 @@ public class Harmonia implements AutoCloseable {
       // not exist. Unregistering a name that was never registered costs nothing.
       CloudInitServer.unregister(s.getName());
       report.skip(s.getId(), "create failed: " + cause(e));
+      report.sub(rollback(s.getName(), created));
     }
   }
 
   /**
-   * Creates the blank volumes of a new VM and hands their paths to the server, so {@code
-   * buildServerXml} can point the domain's disks at them.
+   * Records that the guest phoned home: {@code <mnem:init state='finished'>}, written the moment it
+   * does rather than after the wait, so a run interrupted in between does not leave a configured VM
+   * marked pending. Called on a cloud-init server thread, possibly more than once for one guest.
    *
-   * <p>A volume already in the pool under the expected name is reused and reported, never replaced.
-   * For the root disk that is a retried creation; for a data disk it can be the previous life of a
-   * VM with the same name, which is exactly why Mnemosyne does not delete it to get a blank one.
+   * <p>The whole metadata element is rewritten from what the VM was created with in this run —
+   * nothing else changes it in the meantime, since a VM being created is not also being updated.
    */
-  private List<String> createExtraVolumes(Server s) throws LibvirtException {
+  private void confirmInit(Server s) throws LibvirtException {
+    synchronized (s) {
+      InitMarker finished = s.getInit().finish(Instant.now());
+      domainOps.writeMetadata(
+          s.getName(),
+          s.buildMnemosyneMetadataXml(
+              s.ownedPaths(), List.copyOf(s.getReusedVolPaths()), finished));
+      s.setInit(finished);
+    }
+  }
+
+  /**
+   * Deletes the volumes a failed creation made, and returns what the report says about them.
+   *
+   * <p>Only volumes this attempt created are touched; a reused one was never in {@code created}.
+   * Nothing is deleted while a domain of that name is defined, or when that cannot be told: the
+   * volumes may be under it. What is left is named, so the operator can decide — a run killed
+   * between creating a volume and defining the domain leaves the same kind of volume behind, and
+   * the next run can only find it and reuse it.
+   */
+  private List<String> rollback(String name, List<String> created) {
+    if (created.isEmpty()) return List.of();
+    try {
+      if (!domainOps.isDefined(name)) {
+        storageOps.deleteVolumes(created, name);
+        return created.stream().map(p -> p + " - created by this attempt, deleted").toList();
+      }
+      log.debug("[ {} ] domain '{}' is still defined, its volumes are kept", group, name);
+    } catch (LibvirtException | RuntimeException e) {
+      log.debug("[ {} ] rollback of the volumes of '{}' failed", group, name, e);
+    }
+    return created.stream()
+        .map(p -> p + " - created by this attempt, left in the pool: delete it by hand")
+        .toList();
+  }
+
+  /**
+   * Creates the blank volumes of a new VM and hands their paths to the server, so {@code
+   * buildServerXml} can point the domain's disks at them. The paths of the volumes it actually
+   * created are added to {@code created}, one by one, so a failure halfway knows what it made.
+   *
+   * <p>A volume already in the pool under the expected name is reused and reported, never replaced,
+   * and recorded as reused. For the root disk that may be a retried creation; for a data disk it
+   * can be the previous life of a VM with the same name, which is exactly why Mnemosyne does not
+   * delete it to get a blank one — and does not take it for its own either.
+   */
+  private List<String> createExtraVolumes(Server s, List<String> created) throws LibvirtException {
     if (s.getExtraDisks().isEmpty()) return List.of();
 
     Map<String, String> paths = new LinkedHashMap<>();
@@ -666,6 +760,8 @@ public class Harmonia implements AutoCloseable {
           storageOps.provisionBlankVolume(
               VolumeSpec.blank(
                   disk.volName(s.getName()), disk.getPool(), s.buildExtraVolumeXml(disk)));
+      if (volume.reused()) s.getReusedVolPaths().add(volume.path());
+      else created.add(volume.path());
       paths.put(disk.getName(), volume.path());
       lines.add(
           String.format(
@@ -673,7 +769,7 @@ public class Harmonia implements AutoCloseable {
               disk.getName(),
               disk.getSize(),
               disk.getPool(),
-              volume.reused() ? " (reused existing volume)" : ""));
+              volume.reused() ? " (" + REUSED_NOTE + ")" : ""));
     }
     s.setExtraVolPaths(paths);
     return lines;

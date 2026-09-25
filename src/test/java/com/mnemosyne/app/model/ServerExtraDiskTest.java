@@ -29,6 +29,9 @@ public class ServerExtraDiskTest {
     t.setVolTmpl(ServerExtraDiskTest.class.getResource("/volume.xml").getPath());
 
     Server s = new Server();
+    s.setInit(
+        new InitMarker(
+            "pending", "0123456789abcdef0123456789abcdef", "2026-09-25T10:00:00Z", null));
     s.setId("web-01.example.lan");
     s.setTemplates(t);
     s.setCpu(2);
@@ -207,6 +210,9 @@ public class ServerExtraDiskTest {
     // `extraDisks:` written with nothing under it deserializes to null.
     // Arrange
     Server s = new Server();
+    s.setInit(
+        new InitMarker(
+            "pending", "0123456789abcdef0123456789abcdef", "2026-09-25T10:00:00Z", null));
     // Act
     s.setExtraDisks(null);
     // Assert

@@ -173,6 +173,24 @@ public final class Plan {
   private final Map<String, List<String>> notes;
 
   /**
+   * Managed domains of the inventory whose initialization never finished ({@code <mnem:init
+   * state='pending'>}), keyed by server id.
+   *
+   * <p>Their XML may match the inventory to the last byte and they are still not what it describes:
+   * cloud-init never confirmed it had configured them. They are shown and left alone — nothing is
+   * updated on a VM that was never set up — and they make the run incomplete. What to do with one
+   * is the operator's call until Mnemosyne can replace it.
+   */
+  private final Map<String, DomainState> pendingInit;
+
+  /**
+   * Managed domains of the inventory with no {@code <mnem:init>} or a state Mnemosyne does not
+   * know, keyed by server id, mapped to the reason. Turned into preflight problems by the caller:
+   * Mnemosyne does not guess whether such a VM was ever initialized.
+   */
+  private final Map<String, String> unknownInit;
+
+  /**
    * Disks the inventory wants smaller than they are, keyed by server id.
    *
    * <p>Separate from {@link #notes} because it is not a note: the caller turns these into preflight
@@ -209,9 +227,25 @@ public final class Plan {
     // Every managed domain the inventory knows, diffed once. Both maps below are derived from
     // this list rather than filled in as it is built: update() stays a pure function, so nothing
     // here depends on the pipeline running sequentially, in order, or exactly once per element.
+    List<DomainState> inInventory =
+        managedD.values().stream().filter(d -> servers.containsKey(d.serverId())).toList();
+
+    this.pendingInit =
+        inInventory.stream()
+            .filter(d -> d.init() != null && d.init().isPending())
+            .collect(Collectors.toMap(DomainState::serverId, d -> d, (a, b) -> a, TreeMap::new));
+
+    this.unknownInit =
+        inInventory.stream()
+            .filter(d -> d.init() == null || !d.init().isKnown())
+            .collect(
+                Collectors.toMap(
+                    DomainState::serverId, Plan::unknownInitReason, (a, b) -> a, TreeMap::new));
+
+    // A pending VM is not diffed at all: nothing on it is updated, so there is nothing to show.
     List<Update> matched =
-        managedD.values().stream()
-            .filter(d -> servers.containsKey(d.serverId()))
+        inInventory.stream()
+            .filter(d -> !pendingInit.containsKey(d.serverId()))
             .map(d -> update(servers.get(d.serverId()), d))
             .toList();
 
@@ -263,12 +297,19 @@ public final class Plan {
                                 d.disks().stream()
                                     .filter(disk -> !deletable(d, disk, actual, purgeDisks))
                                     .map(disk -> keptLine(d, disk, actual)),
-                                d.detachedOwned().stream()
-                                    .map(
-                                        p ->
-                                            p
-                                                + " - created by mnemosyne but no longer"
-                                                + " attached, left as is"))
+                                Stream.concat(
+                                    d.detachedOwned().stream()
+                                        .map(
+                                            p ->
+                                                p
+                                                    + " - created by mnemosyne but no longer"
+                                                    + " attached, left as is"),
+                                    d.detachedReused().stream()
+                                        .map(
+                                            p ->
+                                                p
+                                                    + " - reused by mnemosyne, no longer"
+                                                    + " attached, left as is")))
                             .toList(),
                     (a, b) -> a,
                     TreeMap::new));
@@ -374,6 +415,12 @@ public final class Plan {
     return List.copyOf(attach);
   }
 
+  private static String unknownInitReason(DomainState d) {
+    if (d.init() == null)
+      return "has no <mnem:init>, so whether it was ever initialized cannot be told";
+    return "has an unknown init state '" + d.init().state() + "' in <mnem:init>";
+  }
+
   private static boolean deletable(
       DomainState d, DomainState.Disk disk, List<DomainState> actual, boolean purgeDisks) {
     return (disk.owned() || purgeDisks) && sharedWith(d, disk, actual).isEmpty();
@@ -391,7 +438,12 @@ public final class Plan {
   private static String keptLine(DomainState d, DomainState.Disk disk, List<DomainState> actual) {
     return sharedWith(d, disk, actual)
         .map(o -> String.format("%s - also attached to '%s', left as is", disk.path(), o))
-        .orElse(disk.path() + " - not created by mnemosyne, left as is (--purge-disks deletes it)");
+        .orElse(
+            disk.path()
+                + (d.reused(disk.path())
+                    ? " - found in the pool and reused by mnemosyne, not created by it"
+                    : " - not created by mnemosyne")
+                + ", left as is (--purge-disks deletes it)");
   }
 
   /**
@@ -460,6 +512,15 @@ public final class Plan {
           report.add("update", "~", id, u.diff());
           report.sub(notes.getOrDefault(id, List.of()));
         });
+    pendingInit.forEach(
+        (id, d) ->
+            report.add(
+                "pending",
+                "!",
+                id,
+                "init pending"
+                    + (d.init().created() == null ? "" : " since " + d.init().created())
+                    + ": cloud-init never confirmed it finished - left as is"));
     toCreate.forEach(
         (id, s) -> {
           if (blocked(report, preflight, id)) return;
@@ -479,8 +540,9 @@ public final class Plan {
 
     // A server whose only finding is a disk that must not shrink has neither work nor a note, and
     // would otherwise vanish from the plan that is about to stop because of it.
-    shrinks
-        .keySet()
+    // The same goes for a domain whose init state cannot be told and that has no drift either.
+    Stream.concat(shrinks.keySet().stream(), unknownInit.keySet().stream())
+        .distinct()
         .forEach(
             id -> {
               if (toUpdate.containsKey(id) || notes.containsKey(id)) return;
