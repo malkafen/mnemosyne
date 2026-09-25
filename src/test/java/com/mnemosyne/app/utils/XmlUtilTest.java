@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.mnemosyne.app.exception.XmlParseException;
 import com.mnemosyne.app.model.DomainState;
+import com.mnemosyne.app.model.InitMarker;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 
@@ -233,5 +234,94 @@ public class XmlUtilTest {
     assertThat(s.ownedPaths()).containsExactly("/img/web-01.qcow2");
     assertThat(s.detachedOwned()).containsExactly("/img/web-01-cache.qcow2");
     assertThat(s.disks()).hasSize(2);
+  }
+
+  @Test
+  void getShortState_readsMnemReusedDisks_andNeverTakesAReusedVolumeForOwned() {
+    // A path on both lists can only come from a hand edit; keeping the volume is the mistake that
+    // can be undone, so reused wins.
+    String xml =
+        """
+        <domain type='kvm'>
+          <name>web-01</name>
+          <metadata>
+            <mnem:mnemosyne xmlns:mnem="https://mnemosyne.dev/schema/v1">
+              <mnem:managedBy>mnemosyne</mnem:managedBy>
+              <mnem:serverId>web-01</mnem:serverId>
+              <mnem:disks>
+                <mnem:disk path='/img/web-01.qcow2'/>
+                <mnem:disk path='/img/web-01-data.qcow2'/>
+              </mnem:disks>
+              <mnem:reused-disks>
+                <mnem:volume path='/img/web-01-data.qcow2'/>
+                <mnem:volume path='/img/web-01-old.qcow2'/>
+              </mnem:reused-disks>
+            </mnem:mnemosyne>
+          </metadata>
+          <memory unit='KiB'>2097152</memory>
+          <vcpu>2</vcpu>
+          <devices>
+            <disk type='file' device='disk'>
+              <source file='/img/web-01.qcow2'/><target dev='vda'/>
+            </disk>
+            <disk type='file' device='disk'>
+              <source file='/img/web-01-data.qcow2'/><target dev='vdb'/>
+            </disk>
+          </devices>
+        </domain>
+        """;
+
+    DomainState s = XmlUtil.getShortState(xml);
+
+    assertThat(s.ownedPaths()).containsExactly("/img/web-01.qcow2");
+    assertThat(s.reusedPaths()).containsExactly("/img/web-01-data.qcow2", "/img/web-01-old.qcow2");
+    assertThat(s.detachedReused()).containsExactly("/img/web-01-old.qcow2");
+    assertThat(s.detachedOwned()).isEmpty();
+  }
+
+  @Test
+  void getShortState_readsMnemInit_asItIs() {
+    String xml =
+        """
+        <domain type='kvm'>
+          <name>web-01</name>
+          <metadata>
+            <mnem:mnemosyne xmlns:mnem="https://mnemosyne.dev/schema/v1">
+              <mnem:managedBy>mnemosyne</mnem:managedBy>
+              <mnem:serverId>web-01</mnem:serverId>
+              <mnem:init state='finished' token='ab12' created='2026-09-25T10:00:03Z'
+                         finished='2026-09-25T10:04:41Z'/>
+            </mnem:mnemosyne>
+          </metadata>
+          <memory unit='KiB'>2097152</memory>
+          <vcpu>2</vcpu>
+        </domain>
+        """;
+
+    DomainState s = XmlUtil.getShortState(xml);
+
+    assertThat(s.init())
+        .isEqualTo(
+            new InitMarker("finished", "ab12", "2026-09-25T10:00:03Z", "2026-09-25T10:04:41Z"));
+  }
+
+  @Test
+  void getShortState_noMnemInit_isNull_notAssumed() {
+    String xml =
+        """
+        <domain type='kvm'>
+          <name>web-01</name>
+          <metadata>
+            <mnem:mnemosyne xmlns:mnem="https://mnemosyne.dev/schema/v1">
+              <mnem:managedBy>mnemosyne</mnem:managedBy>
+              <mnem:serverId>web-01</mnem:serverId>
+            </mnem:mnemosyne>
+          </metadata>
+          <memory unit='KiB'>2097152</memory>
+          <vcpu>2</vcpu>
+        </domain>
+        """;
+
+    assertThat(XmlUtil.getShortState(xml).init()).isNull();
   }
 }

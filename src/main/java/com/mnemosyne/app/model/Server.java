@@ -11,6 +11,7 @@ import jakarta.validation.constraints.*;
 import java.io.File;
 import java.io.IOException;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -96,6 +97,20 @@ public class Server {
 
   private String volPath = null;
 
+  /**
+   * Paths among {@link #volPath} and {@link #extraVolPaths} that were already in the pool when the
+   * reconciler asked for them. Recorded in {@code <mnem:reused-disks>} instead of {@code
+   * <mnem:disks>}, so they are never deleted with the VM.
+   */
+  private Set<String> reusedVolPaths = new LinkedHashSet<>();
+
+  /**
+   * The {@code <mnem:init>} this VM is created with, set by the reconciler before anything is built
+   * from it. Its token goes into the seed URL, which is how the guest's phone_home proves it is
+   * this guest.
+   */
+  private InitMarker init;
+
   @NotBlank(message = "Libvirt network name is required")
   private String network = "default";
 
@@ -127,15 +142,36 @@ public class Server {
     return extraDisks.stream().map(d -> d.volName(getName())).toList();
   }
 
-  public record Seed(String name, String metaData, String userData, String networkConfig) {}
+  /**
+   * What the cloud-init server hands out for one VM. {@code token} is the path segment every
+   * request for it has to carry; it is never logged.
+   */
+  public record Seed(
+      String name, String token, String metaData, String userData, String networkConfig) {}
 
   public Seed buildSeed() {
-    return new Seed(getName(), buildMetaData(), buildUserDataYaml(), buildNetworkConfigYaml());
+    return new Seed(
+        getName(),
+        requireInit().token(),
+        buildMetaData(),
+        buildUserDataYaml(),
+        buildNetworkConfigYaml());
   }
 
+  /**
+   * {@code <metaUrl>/<name>/<token>/}. The token keeps both the seed and phone_home to the guest
+   * the domain was built for: the SMBIOS serial that carries this URL is readable by root inside
+   * the guest and by whoever can already manage the domain on the host, and by nobody else.
+   */
   private String seedUrl() {
     String base = metaUrl.endsWith("/") ? metaUrl : metaUrl + "/";
-    return base + getName() + "/";
+    return base + getName() + "/" + requireInit().token() + "/";
+  }
+
+  private InitMarker requireInit() {
+    if (init == null || init.token() == null)
+      throw new IllegalStateException("No init marker with a token for server '" + getName() + "'");
+    return init;
   }
 
   public static String specHash(int cpu, long ram) {
@@ -202,7 +238,7 @@ public class Server {
     XmlUtil.setMemory(doc, "memory", this.ram);
     setElementText(doc, tmpl, "vcpu", String.valueOf(this.cpu));
     setElementTextNS(doc, "https://mnemosyne.dev/schema/v1", "serverId", getId());
-    appendOwnedDisks(doc);
+    appendMetadata(doc);
     setCloudInitSerial(doc);
     setDiskSource(doc);
     appendExtraDisks(doc);
@@ -212,41 +248,73 @@ public class Server {
 
   /**
    * The whole {@code <mnem:mnemosyne>} element, for {@code setMetadata}, which replaces it rather
-   * than merging. {@code ownedPaths} are the volumes Mnemosyne created: none for an adopted VM.
+   * than merging. {@code ownedPaths} are the volumes Mnemosyne created, {@code reusedPaths} the
+   * ones it found in the pool and attached: none of either for an adopted VM.
    */
-  public String buildMnemosyneMetadataXml(List<String> ownedPaths) {
+  public String buildMnemosyneMetadataXml(
+      List<String> ownedPaths, List<String> reusedPaths, InitMarker init) {
     StringBuilder disks = new StringBuilder();
     for (String p : ownedPaths) disks.append(String.format("<disk path='%s'/>", p));
+    StringBuilder reused = new StringBuilder();
+    for (String p : reusedPaths) reused.append(String.format("<volume path='%s'/>", p));
     return String.format(
         "<mnemosyne>"
             + "<managedBy>mnemosyne</managedBy>"
             + "<serverId>%s</serverId>"
             + "<specVersion>1</specVersion>"
             + "<disks>%s</disks>"
+            + "<reused-disks>%s</reused-disks>"
+            + "%s"
             + "</mnemosyne>",
-        getId(), disks);
+        getId(), disks, reused, init == null ? "" : init.toXml());
   }
 
   /**
-   * Records every volume this VM is created with in {@code <mnem:disks>}, next to {@code serverId}.
-   * Built here rather than taken from the template, so a customised template needs no new element.
+   * Records the volumes this VM is created with next to {@code serverId}: the ones Mnemosyne
+   * created in {@code <mnem:disks>}, the ones it found in the pool in {@code <mnem:reused-disks>} —
+   * and its {@code <mnem:init>}, pending, so the domain never exists without one. Built here rather
+   * than taken from the template, so a customised template needs no new element.
+   *
+   * <p>A reused volume is a {@code <mnem:volume>}, not a {@code <mnem:disk>}, on purpose: a build
+   * from before this record looks up every {@code <mnem:disk>} in the metadata, and would take a
+   * reused volume for one of its own and delete it.
    */
-  private void appendOwnedDisks(Document doc) {
+  private void appendMetadata(Document doc) {
     String ns = "https://mnemosyne.dev/schema/v1";
     Node meta = doc.getElementsByTagNameNS(ns, "serverId").item(0).getParentNode();
-    Element disks = doc.createElementNS(ns, "mnem:disks");
-    for (String path : ownedPaths()) {
-      Element disk = doc.createElementNS(ns, "mnem:disk");
-      disk.setAttribute("path", path);
-      disks.appendChild(disk);
-    }
-    meta.appendChild(disks);
+    meta.appendChild(pathList(doc, ns, "mnem:disks", "mnem:disk", ownedPaths()));
+    meta.appendChild(
+        pathList(doc, ns, "mnem:reused-disks", "mnem:volume", List.copyOf(reusedVolPaths)));
+    meta.appendChild(initElement(doc, ns));
   }
 
-  private List<String> ownedPaths() {
+  /** {@code <mnem:init state='pending' ...>}, in the XML the domain is defined with. */
+  private Element initElement(Document doc, String ns) {
+    InitMarker marker = requireInit();
+    Element element = doc.createElementNS(ns, "mnem:init");
+    element.setAttribute("state", marker.state());
+    element.setAttribute("token", marker.token());
+    if (marker.created() != null) element.setAttribute("created", marker.created());
+    return element;
+  }
+
+  private static Element pathList(
+      Document doc, String ns, String listTag, String itemTag, List<String> paths) {
+    Element list = doc.createElementNS(ns, listTag);
+    for (String path : paths) {
+      Element item = doc.createElementNS(ns, itemTag);
+      item.setAttribute("path", path);
+      list.appendChild(item);
+    }
+    return list;
+  }
+
+  /** The volumes this VM was created with that Mnemosyne made itself. */
+  public List<String> ownedPaths() {
     List<String> paths = new java.util.ArrayList<>();
     if (this.volPath != null) paths.add(this.volPath);
     paths.addAll(this.extraVolPaths.values());
+    paths.removeAll(this.reusedVolPaths);
     return paths;
   }
 

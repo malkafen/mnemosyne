@@ -8,6 +8,7 @@ import java.util.Set;
 import java.util.concurrent.TimeUnit;
 import org.libvirt.Connect;
 import org.libvirt.Domain;
+import org.libvirt.Error;
 import org.libvirt.LibvirtException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -244,6 +245,23 @@ class DomainOps {
     } finally {
       freeDomainQuietly(d);
     }
+  }
+
+  /**
+   * Whether a domain of this name is defined. Any answer but libvirt's "no such domain" is an
+   * error, not a no: the caller uses it to decide whether volumes are free to delete.
+   */
+  boolean isDefined(String name) throws LibvirtException {
+    Domain d;
+    try {
+      d = connect.domainLookupByName(name);
+    } catch (LibvirtException e) {
+      if (e.getError() != null && e.getError().getCode() == Error.ErrorNumber.VIR_ERR_NO_DOMAIN)
+        return false;
+      throw e;
+    }
+    freeDomainQuietly(d);
+    return true;
   }
 
   void undefineDomain(String name) throws LibvirtException {

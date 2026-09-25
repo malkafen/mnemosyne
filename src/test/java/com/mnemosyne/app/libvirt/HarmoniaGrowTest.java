@@ -51,6 +51,7 @@ public class HarmoniaGrowTest {
               <mnem:managedBy>mnemosyne</mnem:managedBy>
               <mnem:serverId>web-01</mnem:serverId>
               <mnem:specVersion>1</mnem:specVersion>
+              <mnem:init state='finished' token='t' created='2026-09-25T10:00:00Z'/>
             </mnem:mnemosyne>
           </metadata>
           <memory unit='KiB'>2097152</memory>

@@ -177,7 +177,14 @@ class StorageOps {
     }
   }
 
-  String provisionVolume(VolumeSpec spec) throws LibvirtException {
+  /**
+   * Clones the root volume from the base image, or hands back the one that is already there.
+   *
+   * <p>An existing volume is reused, never replaced, and reported as reused: it may be the leftover
+   * of a creation that was interrupted, or a disk somebody put there, and Mnemosyne cannot tell the
+   * two apart. The caller records it as not its own.
+   */
+  Provisioned provisionVolume(VolumeSpec spec) throws LibvirtException {
     log.debug(
         "Provisioning volume for domain '{}' in storage pool '{}'",
         spec.volumeName(),
@@ -185,8 +192,11 @@ class StorageOps {
     StoragePool pool = lookupPool(spec.poolName());
     try {
       Optional<String> path = findExistingVolumePath(pool, spec.volumeName());
-      if (path.isPresent()) return path.get();
-      return newVolume(pool, spec);
+      if (path.isPresent()) {
+        log.debug("Volume '{}' already exists, reusing it as is", spec.volumeName());
+        return new Provisioned(path.get(), true);
+      }
+      return new Provisioned(newVolume(pool, spec), false);
     } finally {
       freePoolQuietly(pool);
     }

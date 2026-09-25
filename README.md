@@ -16,6 +16,7 @@ datasource served by a built-in HTTP server.
 | Server | One virtual machine, that is, one libvirt domain. |
 | `serverId` | The inventory map key. It is written into the domain's libvirt metadata and is the only identity Mnemosyne matches on, so a VM can be renamed without being recreated. |
 | managed / unmanaged | A domain is managed when it carries `managedBy: mnemosyne` metadata. Pre-existing domains are unmanaged and are never touched unless adopted with `--join`. |
+| init marker | `<mnem:init>` in a managed domain's metadata — `pending`, `finished` or `adopted` — whether its one-off cloud-init is known to have finished. See [Initialization](#initialization). |
 | Plan | The diff between the inventory (desired state) and the domains found on the host (current state), reported as `create`, `update` and `delete`, plus `note` lines for what is seen but deliberately left alone. Unmanaged domains are listed under `--join`, which is what adopting them needs. |
 | Extra disk | An additional blank disk of a VM, declared under `extraDisks`. Created and attached when it is missing and grown when the inventory asks for more; never detached, shrunk or deleted while the VM exists. |
 
@@ -33,6 +34,8 @@ datasource served by a built-in HTTP server.
      from the inventory, that are missing an extra disk the inventory lists, or that have a disk
      smaller than the inventory asks for;
    - **delete** — managed domains no longer listed in the inventory (suppressed by `--no-delete`);
+   - **pending** — managed domains of the inventory whose cloud-init never confirmed it finished
+     (`<mnem:init state="pending">`): shown, never updated, and the run exits `1`;
    - **unmanaged** — everything else: never touched, and listed only under `--join`.
 4. Everything the planned **create** entries and disk attachments need is checked before the plan
    is printed: every storage pool exists and is running, the pool of a VM being created holds the
@@ -44,7 +47,9 @@ datasource served by a built-in HTTP server.
    first and the pool is refreshed only if the image is missing from it, so an image copied into
    the pool a moment ago is still found. A VM that cannot be created is listed as `blocked` instead
    of `create`, with the reason, and one blocked VM stops the whole run: nothing is created, updated
-   or deleted, in any group. `--join` creates nothing and is not checked.
+   or deleted, in any group. A managed domain of the inventory with no `<mnem:init>`, or a state
+   Mnemosyne does not know, is `blocked` the same way: whether it was ever initialized is not
+   guessed. `--join` creates nothing and is not checked.
    With `--plan` the run stops after this.
 5. The cloud-init server starts on port 8080 under `/cloud-init`, followed by a 10-second
    confirmation window (`Ctrl+C` aborts).
@@ -63,7 +68,9 @@ datasource served by a built-in HTTP server.
      requested capacity, creates any `extraDisks` as blank volumes, registers the cloud-init seed,
      then defines and boots the domain. A new VM always boots once, whatever `launch` says, so
      cloud-init can configure it; a VM with `launch: false` is shut down again at the end of the
-     run. A volume that already carries the expected name is reused; a failed resize is rolled back.
+     run. A volume that already carries the expected name is reused, and recorded as reused rather
+     than created, so it is never deleted with the VM; a failed resize is rolled back, and a
+     creation that fails afterwards deletes the volumes it created itself and nothing else.
    Failures are per-VM: the entry is reported as skipped and the run continues.
    VMs are applied one at a time unless `--parallel <n>` asks for more. Each of the three phases
    then applies up to `n` of them at once and is finished before the next one starts, so a name
@@ -76,13 +83,39 @@ datasource served by a built-in HTTP server.
    request is waited on for a full minute before it is destroyed — and reported under `Settled`, as
    `initialized` or `cloud-init did not finish`. The connections and the HTTP server are then closed. Starting an existing VM needs no seed and is never awaited: every
    managed VM has already been through cloud-init.
-8. The run ends with a closing line and an exit code. A skipped entry or a guest that never phoned
-   home leaves the host short of the inventory, so such a run exits non-zero even though
-   everything else was applied.
+8. The run ends with a closing line and an exit code. A skipped entry, a guest that never phoned
+   home or a VM left pending by an earlier run leaves the host short of the inventory, so such a
+   run exits non-zero even though everything else was applied. `--plan` exits `1` too when the
+   plan has a pending VM.
 
-Guests find their configuration through the SMBIOS serial `ds=nocloud;s=<metaUrl><name>/`, which
-points cloud-init at `meta-data`, `user-data`, `network-config` and `vendor-data` on Mnemosyne's
-HTTP server. `metaUrl` must therefore resolve from inside the guest.
+Guests find their configuration through the SMBIOS serial `ds=nocloud;s=<metaUrl><name>/<token>/`,
+which points cloud-init at `meta-data`, `user-data`, `network-config` and `vendor-data` on
+Mnemosyne's HTTP server, and `phone_home` at `<metaUrl><name>/<token>/phone-home`. `metaUrl` must
+therefore resolve from inside the guest. A request without the right token is answered `404`, the
+same as an unknown name.
+
+### Initialization
+
+A domain's XML can match the inventory and the VM still not be what the inventory describes, if
+cloud-init never finished on it. Mnemosyne records that separately, in the domain's metadata:
+
+```xml
+<mnem:init state="finished" token="9f2c…" created="2026-09-25T10:00:03Z" finished="2026-09-25T10:04:41Z"/>
+```
+
+- A new domain is defined with `state="pending"` and a random 128-bit `token` already in its XML.
+  The token is also in its seed URL, readable inside the guest by root only (the SMBIOS serial).
+- The guest's `phone_home` carries the token back. Mnemosyne writes `state="finished"` with the
+  time, and only then answers `200`. If the write fails the answer is `500`, and cloud-init retries.
+  A `launch: false` VM phones home before it is shut down, the same way.
+- A run that ends before that — Ctrl+C, a killed process, the 5-minute timeout — leaves `pending`.
+  The next plan lists such a VM as `pending` instead of `no changes`, leaves it alone and exits
+  `1`. What to do with it is the operator's call: delete it by removing it from the inventory, or
+  set the state by hand with `virsh metadata` once the guest is checked.
+- `--join` writes `state="adopted"`, without a token: an adopted VM's initialization was never
+  Mnemosyne's business.
+- `finished` means cloud-init got as far as `phone_home`, which runs at the end of its final stage.
+  It does not mean every module before it succeeded: cloud-init carries on past a failed one.
 
 ### Adopting existing VMs
 
@@ -136,7 +169,7 @@ Debian/Ubuntu, `/usr/lib64` on RHEL/Fedora, `/opt/homebrew/lib` on macOS.
 | Exit code | Meaning |
 | --- | --- |
 | `0` | The host matches the inventory: everything planned was applied and every new guest reported back |
-| `1` | Either nothing was applied (a blocked plan or a fatal error) or the run finished incomplete — an entry was skipped, or a guest never finished cloud-init |
+| `1` | Either nothing was applied (a blocked plan or a fatal error) or the run finished incomplete — an entry was skipped, a guest never finished cloud-init, or a VM of the inventory is still pending from an earlier run (`--plan` included) |
 | `2` | Invalid command line |
 
 ### Docker
@@ -232,7 +265,7 @@ next run.
 | `size` decreased | **Nothing, and the run stops.** Shrinking a disk destroys whatever sits past the new end, so the VM is listed as `blocked` with both sizes and nothing is applied, in any group, until the inventory says at least what the disk already is. |
 | `pool` changed on an existing disk | **Nothing.** Data is never moved between pools; the disk is reported as missing from the new pool and left where it is. |
 | A disk attached by hand, outside the inventory | Reported once, never touched — also when the VM is deleted, unless `--purge-disks` is given. |
-| The VM removed from the inventory | The volumes Mnemosyne created for it — root and extra disks, recorded in the domain's metadata — are deleted with it. Anything else stays and is listed under the delete as `left as is`: a volume attached by hand or belonging to an adopted VM (`--purge-disks` deletes those too), and always a volume that another domain also uses or that Mnemosyne created but somebody detached from the VM. The plan lists every volume by path before the confirmation window, so nothing disappears unannounced — and `--no-delete` keeps all of them. |
+| The VM removed from the inventory | The volumes Mnemosyne created for it — root and extra disks, recorded in the domain's metadata — are deleted with it. Anything else stays and is listed under the delete as `left as is`: a volume attached by hand, belonging to an adopted VM, or found in the pool and reused when the VM was created (`--purge-disks` deletes those too), and always a volume that another domain also uses or that Mnemosyne created but somebody detached from the VM. The plan lists every volume by path before the confirmation window, so nothing disappears unannounced — and `--no-delete` keeps all of them. |
 
 ### Growing a disk
 
@@ -269,7 +302,12 @@ attaching several disks to one running guest typically places the first and repo
 the volumes exist and the disks are in the config — and the next start brings them in.
 
 A volume that already exists under the expected name is **reused, never replaced**: recreating a VM
-with the same name gives it its old data disk back, reported as `reused existing volume`. A volume
+with the same name gives it its old data disk back, reported as `reused existing volume`. Mnemosyne
+cannot tell such a volume from one it left behind itself, so it does not take it for its own: it is
+recorded in the domain's metadata as reused (`<mnem:reused-disks>`), not as created
+(`<mnem:disks>`), and deleting the VM leaves it in the pool. The same goes for the root disk. The
+flip side is a run killed between creating a volume and defining its domain: the volume stays in
+the pool, the next run reuses it, and removing it is the operator's call. A volume
 that is already attached to a *different* domain is the one disk condition that blocks the run
 outright, because two domains sharing one qcow2 corrupt it as soon as both are running.
 

@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- `<mnem:init>` records whether a VM's one-off initialization finished. The plan compared only
+  what the domain XML says, so a VM whose cloud-init never completed — a run interrupted during the
+  phone_home wait, a timeout, a forged phone_home — was reported as `no changes` from then on and
+  could only be recovered by hand. A new domain is now defined with `state="pending"` and a random
+  128-bit token already in its XML, so any way a run can end early leaves `pending` behind. The
+  token is part of the seed URL (`<metaUrl><name>/<token>/`) and of phone_home's; a request without
+  it gets `404`. On the guest's phone_home the marker becomes `state="finished"` with the time, and
+  only then is the guest answered `200` (`500` if the write failed, so cloud-init retries). A VM
+  found pending is listed as `pending` in the plan, never updated, and makes the run — `--plan`
+  included — exit `1`. `--join` writes `state="adopted"`. A managed VM of the inventory with no
+  marker, or a state Mnemosyne does not know, is `blocked`: whether it was initialized is not
+  guessed. Domains created by an earlier version carry no marker and are blocked; add one with
+  `virsh metadata` or recreate them.
 - `--parallel <n>` applies several VMs of a group at once. The work behind a
   `create` is a base image being copied and the work behind a `stop` is up to a minute of waiting
   for a guest to go down, and both used to be paid once per VM, in a row. The three phases keep
@@ -36,6 +49,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   more dangerous of the two options.
 
 ### Fixed
+- A volume found in the pool when a VM was created is no longer recorded as created by Mnemosyne.
+  Root and data volumes that already carried the expected name were reused — as intended — but
+  listed in `<mnem:disks>` next to the ones Mnemosyne had made, so removing the VM from the
+  inventory deleted a disk somebody had put there. Such a volume is now recorded in
+  `<mnem:reused-disks>` and kept when the VM is deleted, listed under the delete as `left as is`
+  (`--purge-disks` still deletes it). The report says so at creation. The record uses a
+  `<mnem:volume>` element on purpose: an older build reads every `<mnem:disk>` as its own. A disk
+  added to an existing VM follows the same rule, except for the volume a failed attach left behind
+  in the previous run, which is still the VM's own. A creation that fails after its volumes exist
+  now deletes the ones it created itself — never a reused one, and nothing while a domain of that
+  name is defined; what it cannot delete is named in the report.
 - A storage pool that refuses to refresh no longer costs the VM that asked. The refresh only makes
   libvirt notice volumes put in the pool's directory behind its back; everything after it talks to
   the host regardless, so a refresh that fails is now logged and stepped over. It has to be:

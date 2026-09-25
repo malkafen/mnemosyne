@@ -20,6 +20,9 @@ public class ShippedTemplateTest {
     t.setVolTmpl("templates/volume.xml");
 
     Server s = new Server();
+    s.setInit(
+        new InitMarker(
+            "pending", "0123456789abcdef0123456789abcdef", "2026-09-25T10:00:00Z", null));
     s.setId("web-01.example.lan");
     s.setTemplates(t);
     s.setCpu(2);
@@ -39,7 +42,8 @@ public class ShippedTemplateTest {
     assertThat(xml)
         .contains("<name>web-01.example.lan</name>")
         .contains("<memory unit=\"KiB\">2097152</memory>")
-        .contains("ds=nocloud;s=http://192.0.2.5:8080/cloud-init/web-01.example.lan/")
+        .contains(
+            "ds=nocloud;s=http://192.0.2.5:8080/cloud-init/web-01.example.lan/0123456789abcdef0123456789abcdef/")
         .contains("file=\"/var/lib/libvirt/images/web-01.example.lan\"")
         .contains("network=\"host-bridge\"");
 
