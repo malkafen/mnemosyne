@@ -116,7 +116,7 @@
       # Override the default templates only if you keep them somewhere custom.
       # These are the defaults; a `templates:` block is also valid at group level.
       # templates:
-      #   serverTmpl: "/app/templates/server.xml"        # use server_arm.xml on aarch64 hosts
+      #   serverTmpl: "/app/templates/server.xml"
       #   volTmpl: "/app/templates/volume.xml"
       #   metaDataTmpl: "/app/templates/meta-data.yml"
       #   userDataTmpl: "/app/templates/user-data.yml"
