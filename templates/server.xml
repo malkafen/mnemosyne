@@ -15,6 +15,10 @@
     <mnem:serverId>                 the inventory key Mnemosyne matches domains on
     <mnem:disks>                    added: one <mnem:disk path=…/> per volume Mnemosyne creates;
                                     only these are deleted with the VM
+    <mnem:reused-disks>             added: one <mnem:volume path=…/> per volume found in the pool
+                                    and reused; kept when the VM is deleted
+    <mnem:init>                     added: state='pending' and a random token; set to 'finished'
+                                    when the guest's cloud-init phones home
     <entry name='serial'>           cloud-init NoCloud datasource URL
     <disk device='disk'>/<source>   @file — path of the cloned volume (first such disk)
     <interface>/<source>            @network — libvirt network name (first interface)
