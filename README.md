@@ -25,6 +25,11 @@ difference and applies it.
 
 ## Quick start
 
+> Prebuilt releases are published too: the jar on
+> [Releases](https://github.com/malkafen/mnemosyne/releases) and the Docker image
+> [`ghcr.io/malkafen/mnemosyne:latest`](https://github.com/malkafen/mnemosyne/pkgs/container/mnemosyne)
+> — use them instead of building from source.
+
 Requirements — here: Java 17+, Maven, the libvirt client libraries (`libvirt0`,
 `libvirt-clients`, `libvirt-dev`) and an SSH key the hypervisors accept. On each hypervisor:
 libvirt/KVM reachable over SSH, a storage pool holding a base cloud image (e.g. a Debian
