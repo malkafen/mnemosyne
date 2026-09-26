@@ -45,8 +45,16 @@ jobs:
           distribution: temurin
           cache: maven
 
+      # The *IT tests talk to libvirt's in-memory test driver through JNA: the client library is
+      # all they need, no daemon and no KVM.
+      - name: Install libvirt client library
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q --no-install-recommends libvirt0 libvirt-dev
+
+      # verify = package + the integration tests (maven-failsafe-plugin, *IT).
       - name: Build
-        run: mvn -B --no-transfer-progress clean package
+        run: mvn -B --no-transfer-progress clean verify
 
       - name: Upload jar
         uses: actions/upload-artifact@v4

@@ -94,8 +94,16 @@ A plan looks like this ([more output examples](docs/output.md)):
 
 ```bash
 mvn spotless:apply    # google-java-format; CI runs spotless:check and rejects unformatted code
-mvn test
+mvn test              # unit tests, libvirt mocked
+mvn verify            # + *IT: the reconciler against libvirt's in-memory test driver
 ```
+
+`mvn verify` needs only the libvirt client library (`libvirt0`): the integration tests open
+`test:///` connections to [`src/test/resources/libvirt/test-node.xml`](src/test/resources/libvirt/test-node.xml),
+so no daemon, KVM or hypervisor is involved. The test driver cannot resize a volume or a block
+device and cannot attach a disk to the persistent config, so growing and adding disks stay covered
+by the unit tests only. On macOS, `brew install libvirt` is enough: a Maven profile points JNA at
+Homebrew's `lib`. Without the library the integration tests are skipped locally and fail in CI.
 
 ## License
 

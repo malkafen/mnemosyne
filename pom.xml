@@ -94,6 +94,22 @@
                 <version>3.2.2</version>
             </plugin>
 
+            <!-- *IT tests: the reconciler against libvirt's in-memory test driver (needs libvirt0).
+                 Run by `mvn verify`, not by `mvn test`. -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-failsafe-plugin</artifactId>
+                <version>3.2.2</version>
+                <executions>
+                    <execution>
+                        <goals>
+                            <goal>integration-test</goal>
+                            <goal>verify</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
+
             <!-- Google Java Format. `mvn spotless:apply` rewrites, `mvn spotless:check` verifies (CI). -->
             <plugin>
                 <groupId>com.diffplug.spotless</groupId>
@@ -219,4 +235,33 @@
        </dependency>
 
     </dependencies>
+
+    <profiles>
+        <!-- Homebrew's libvirt is outside JNA's default search path; only the *IT tests load it.
+             Apple silicon first, then Intel. An explicit -Djna.library.path still wins. -->
+        <profile>
+            <id>macos-homebrew-libvirt</id>
+            <activation>
+                <os>
+                    <family>mac</family>
+                </os>
+            </activation>
+            <properties>
+                <jna.library.path>/opt/homebrew/lib:/usr/local/lib</jna.library.path>
+            </properties>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-failsafe-plugin</artifactId>
+                        <configuration>
+                            <systemPropertyVariables>
+                                <jna.library.path>${jna.library.path}</jna.library.path>
+                            </systemPropertyVariables>
+                        </configuration>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+    </profiles>
 </project>

@@ -1,0 +1,44 @@
+<!--
+  The host HarmoniaLibvirtIT runs against: libvirt's in-memory test driver, opened as
+  test:///<absolute path to this file>. Every connection to it starts from this state and keeps
+  its changes to itself, so each test gets a fresh host and nothing touches the disk.
+
+  The driver has no virStorageVolResize, so a root disk cloned from the base image cannot be
+  brought to size and its creation is rolled back. web-01.qcow2 is therefore already in the pool:
+  a VM called web-01 reuses it as its root disk, which is the path every create test goes down.
+-->
+<node>
+  <network>
+    <name>default</name>
+    <bridge name="virbr0"/>
+    <forward/>
+    <ip address="192.168.122.1" netmask="255.255.255.0"/>
+  </network>
+  <pool type="dir">
+    <name>default</name>
+    <target>
+      <path>/var/lib/libvirt/images</path>
+    </target>
+    <volume>
+      <name>debian-13-genericcloud-amd64.qcow2</name>
+      <capacity unit="GiB">3</capacity>
+      <target>
+        <format type="qcow2"/>
+      </target>
+    </volume>
+    <volume>
+      <name>web-01.qcow2</name>
+      <capacity unit="GiB">20</capacity>
+      <target>
+        <format type="qcow2"/>
+      </target>
+    </volume>
+    <volume>
+      <name>web-02.qcow2</name>
+      <capacity unit="GiB">20</capacity>
+      <target>
+        <format type="qcow2"/>
+      </target>
+    </volume>
+  </pool>
+</node>
