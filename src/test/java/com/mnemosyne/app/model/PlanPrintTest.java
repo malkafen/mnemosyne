@@ -220,4 +220,21 @@ public class PlanPrintTest {
     // Assert
     assertThat(out).contains("no changes");
   }
+
+  @Test
+  void aNameTakenByAnUnmanagedDomain_isShown_notNoChanges() {
+    // Arrange
+    Server s = server("web1");
+    s.setName("web1");
+    DomainState foreign =
+        new DomainState("web1", 2, 2048, null, null, null, List.of(), true, false);
+    Plan plan = new Plan(List.of(foreign), Map.of("web1", s), false);
+    // Act
+    String out = print(plan);
+    // Assert
+    assertThat(out)
+        .contains("unjoined: 1")
+        .contains("! web1  (name 'web1' is taken by an unmanaged domain - adopt it with --join)")
+        .doesNotContain("no changes");
+  }
 }

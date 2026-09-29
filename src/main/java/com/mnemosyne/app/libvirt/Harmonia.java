@@ -266,6 +266,11 @@ public class Harmonia implements AutoCloseable {
     return this.plan == null ? List.of() : List.copyOf(this.plan.getPendingInit().keySet());
   }
 
+  /** Inventory servers whose name an unmanaged domain holds; each one makes the run incomplete. */
+  public List<String> unjoined() {
+    return this.plan == null ? List.of() : List.copyOf(this.plan.getToAdopt().keySet());
+  }
+
   private void refuseShrinks(Preflight preflight) {
     this.plan
         .getShrinks()

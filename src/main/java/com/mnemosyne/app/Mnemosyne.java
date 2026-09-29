@@ -113,10 +113,16 @@ class Mnemosyne {
 
       if (config.isPlanOnly()) {
         List<String> initPending = pendingInit();
-        if (initPending.isEmpty()) return EXIT_OK;
-        System.out.printf(
-            "%d server(s) never finished initialization: %s.%n",
-            initPending.size(), String.join(", ", initPending));
+        List<String> unjoined = unjoined(config.isJoin());
+        if (initPending.isEmpty() && unjoined.isEmpty()) return EXIT_OK;
+        if (!initPending.isEmpty())
+          System.out.printf(
+              "%d server(s) never finished initialization: %s.%n",
+              initPending.size(), String.join(", ", initPending));
+        if (!unjoined.isEmpty())
+          System.out.printf(
+              "%d server(s) have their name taken by an unmanaged domain: %s.%n",
+              unjoined.size(), String.join(", ", unjoined));
         return EXIT_INCOMPLETE;
       }
       CloudInitServer.start();
@@ -139,7 +145,7 @@ class Mnemosyne {
         Report.heading("Settled");
         for (Iris i : irides) i.harmonia().settle(config.getParallel());
       }
-      return outcome(cloudInitOk);
+      return outcome(cloudInitOk, unjoined(config.isJoin()));
     } finally {
       shutdown();
     }
@@ -158,11 +164,15 @@ class Mnemosyne {
    * skipped entry was refused by the host and is in the report above with its reason, while a guest
    * that did not phone home exists, runs, and is simply not configured.
    */
-  private int outcome(boolean cloudInitOk) {
+  private int outcome(boolean cloudInitOk, List<String> unjoined) {
     int skipped = irides.stream().mapToInt(i -> i.harmonia().failures()).sum();
     List<String> pending = CloudInitServer.unfinished();
     List<String> initPending = pendingInit();
-    if (skipped == 0 && cloudInitOk && pending.isEmpty() && initPending.isEmpty()) return EXIT_OK;
+    if (skipped == 0
+        && cloudInitOk
+        && pending.isEmpty()
+        && initPending.isEmpty()
+        && unjoined.isEmpty()) return EXIT_OK;
 
     StringJoiner why = new StringJoiner(", ");
     if (skipped > 0) why.add(skipped + " entr" + (skipped == 1 ? "y" : "ies") + " skipped");
@@ -177,6 +187,11 @@ class Mnemosyne {
           String.format(
               "%d existing server(s) never finished initialization: %s",
               initPending.size(), String.join(", ", initPending)));
+    if (!unjoined.isEmpty())
+      why.add(
+          String.format(
+              "%d server(s) have their name taken by an unmanaged domain: %s",
+              unjoined.size(), String.join(", ", unjoined)));
 
     System.out.printf("%nRun finished incomplete: %s.%n", why);
     return EXIT_INCOMPLETE;
@@ -189,6 +204,15 @@ class Mnemosyne {
    */
   private List<String> pendingInit() {
     return irides.stream().flatMap(i -> i.harmonia().pendingInit().stream()).sorted().toList();
+  }
+
+  /**
+   * Inventory servers left out because an unmanaged domain holds their name. A {@code --join} run
+   * is the one that takes them over, so there they are not a shortfall.
+   */
+  private List<String> unjoined(boolean isJoin) {
+    if (isJoin) return List.of();
+    return irides.stream().flatMap(i -> i.harmonia().unjoined().stream()).sorted().toList();
   }
 
   /**
