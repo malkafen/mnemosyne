@@ -58,7 +58,7 @@ are git-ignored.
 | `volLookup` | group / server | `noble-server-cloudimg-amd64.img` | Base cloud image; must exist in the VM's `pool`. |
 | `metaUrl` | group / server | `http://127.0.0.1:80/files/` — **set it** | Base URL of the [seed server](cloud-init.md#the-seed-server), `http://<this host>:8080/cloud-init/`. |
 | `templates` | group / server | `/app/templates/*` | Merged key by key over the defaults, see [templates](#templates). |
-| `name` | server | the map key | Domain, volume and host name. Can be changed without recreating the VM. |
+| `name` | server | the map key | Domain, volume and host name. Can be changed without recreating the VM. Must be an RFC 1123 host name (letters, digits, `-`, `.`); so must the map key. |
 | `cpu` | server | required | 1-128. Reconciled on every run, applied on the next boot. |
 | `ram` | server | required | MiB, 256-1048576. Same as `cpu`. |
 | `ip` | server | required | CIDR. Written into `network-config` at creation only. |
