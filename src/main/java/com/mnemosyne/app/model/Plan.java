@@ -521,6 +521,18 @@ public final class Plan {
                 "init pending"
                     + (d.init().created() == null ? "" : " since " + d.init().created())
                     + ": cloud-init never confirmed it finished - left as is"));
+    // An inventory server whose name an unmanaged domain already holds is neither created nor
+    // updated, and a plan that said nothing about it would read as "no changes" while the
+    // domain on the host is somebody else's.
+    toAdopt.forEach(
+        (id, s) ->
+            report.add(
+                "unjoined",
+                "!",
+                id,
+                "name '"
+                    + s.getName()
+                    + "' is taken by an unmanaged domain - adopt it with --join"));
     toCreate.forEach(
         (id, s) -> {
           if (blocked(report, preflight, id)) return;
