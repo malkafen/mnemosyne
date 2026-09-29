@@ -6,10 +6,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-09-29
+
+### Upgrading from 0.3.0
+- **Server ids and names are validated.** The map key and `name:` must be RFC 1123 host names:
+  letters, digits, `-` and `.`, labels of 1-63 characters not starting or ending with `-`,
+  253 characters in total. An inventory with `_`, spaces, `/` or an empty `name:` is now refused
+  before anything connects. Check the inventory before upgrading: an existing VM with such an id
+  or name has to be recreated under a valid one, since renaming through `name:` is not carried
+  out yet.
+- **A server whose name an unmanaged domain holds makes the run exit `1`**, `--plan` included,
+  where 0.3.0 printed `no changes` and exited `0`. Adopt the domain with `--join` or rename the
+  server.
+
 ### Added
 - Integration tests (`mvn verify`) that run the reconciler against libvirt's in-memory test
   driver: create, phone_home, the next run's plan, update, delete, `--join`, preflight and the
   rollback of a root disk that could not be sized, with the shipped templates. CI runs them.
+- Server ids and `name:` are validated as RFC 1123 host names. The name is the domain, the host
+  name, the volume file and a segment of the seed URL at once; a character one of them does not
+  accept used to surface only on the host, halfway through a run.
+
+### Fixed
+- A server from the inventory whose name an unmanaged domain already holds was left out of the
+  plan outside `--join`, so the run printed `no changes` and exited `0` while the domain on the host
+  was not Mnemosyne's and none of the inventory was applied to it. It is now listed as `unjoined`
+  with a hint to adopt it with `--join`, and counts towards exit `1` like a `pending` VM. A `--join`
+  run, which is the one that adopts it, does not count it.
 
 ## [0.3.0] - 2026-09-26
 
@@ -195,7 +218,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Initial tracked release.
 
-[Unreleased]: https://github.com/malkafen/mnemosyne/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/malkafen/mnemosyne/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/malkafen/mnemosyne/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/malkafen/mnemosyne/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/malkafen/mnemosyne/compare/v0.1.2...v0.2.0
 [0.1.2]: https://github.com/malkafen/mnemosyne/releases/tag/v0.1.2

@@ -36,9 +36,25 @@ public class Server {
   private static final String IPV4_CIDR_PATTERN =
       "^((25[0-5]|2[0-4]\\d|[01]?\\d\\d?)\\.){3}(25[0-5]|2[0-4]\\d|[01]?\\d\\d?)/(3[0-2]|[12]?\\d)$";
 
+  /**
+   * An RFC 1123 host name: dot-separated labels of 1-63 letters, digits and hyphens, none starting
+   * or ending with a hyphen, 253 characters at most. The name is the domain, the host name, the
+   * volume file and part of the seed URL at once, and this is what all four accept.
+   */
+  private static final String HOSTNAME_PATTERN =
+      "^(?=.{1,253}$)[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?"
+          + "(\\.[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*$";
+
+  private static final String HOSTNAME_MESSAGE =
+      "must be a host name: letters, digits, '-' and '.', labels of at most 63 characters"
+          + " not starting or ending with '-' (e.g. web-01 or web-01.example.lan)";
+
+  @Pattern(regexp = HOSTNAME_PATTERN, message = "Server name " + HOSTNAME_MESSAGE)
   private String name;
 
+  // The id is the name whenever `name` is left out, so it is held to the same rule.
   @NotBlank(message = "Server id is required")
+  @Pattern(regexp = HOSTNAME_PATTERN, message = "Server id " + HOSTNAME_MESSAGE)
   private String id;
 
   private String specHash;
