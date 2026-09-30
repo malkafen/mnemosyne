@@ -99,8 +99,11 @@ flowchart TD
    rejected too — each would delete the other's VMs as absent from the inventory. Nothing is
    contacted before this passes.
 2. **Connect.** One libvirt connection per group:
-   `qemu+ssh://user@host:port/system?keyfile=<key>&no_verify=1&no_tty=1`. The key must be an
-   existing file on the machine running Mnemosyne.
+   `qemu+ssh://user@host:port/system?keyfile=<key>&no_tty=1`. The key must be an
+   existing file on the machine running Mnemosyne, and the host key must already be in
+   `known_hosts`: `no_tty` puts ssh in batch mode, so an unknown or changed key fails the
+   connection instead of prompting. `--no-verify` adds `no_verify=1` and turns
+   the check off.
 3. **Snapshot.** Every domain on the host is read: name, vCPU, RAM, power state, autostart,
    metadata, disks and their capacities.
 4. **Plan** — see [below](#the-plan).

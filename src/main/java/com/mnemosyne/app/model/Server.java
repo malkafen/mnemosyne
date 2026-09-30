@@ -41,11 +41,11 @@ public class Server {
    * or ending with a hyphen, 253 characters at most. The name is the domain, the host name, the
    * volume file and part of the seed URL at once, and this is what all four accept.
    */
-  private static final String HOSTNAME_PATTERN =
+  static final String HOSTNAME_PATTERN =
       "^(?=.{1,253}$)[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?"
           + "(\\.[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*$";
 
-  private static final String HOSTNAME_MESSAGE =
+  static final String HOSTNAME_MESSAGE =
       "must be a host name: letters, digits, '-' and '.', labels of at most 63 characters"
           + " not starting or ending with '-' (e.g. web-01 or web-01.example.lan)";
 

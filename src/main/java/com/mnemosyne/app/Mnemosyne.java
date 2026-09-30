@@ -94,7 +94,14 @@ class Mnemosyne {
     mnemones = loadAndValidate(config);
     try {
       for (Mnemon m : mnemones) {
-        Harmonia h = new Harmonia(m.getGroup(), m.getUser(), m.getKey(), m.getHost(), m.getPort());
+        Harmonia h =
+            new Harmonia(
+                m.getGroup(),
+                m.getUser(),
+                m.getKey(),
+                m.getHost(),
+                m.getPort(),
+                config.isSkipHostKeyCheck());
         irides.add(new Iris(m, h));
       }
 

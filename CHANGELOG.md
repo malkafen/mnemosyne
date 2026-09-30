@@ -6,6 +6,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- `--no-verify` turns off the check of the hypervisors' SSH host keys.
+
+### Security
+- Inventory fields could run a local command: `user` and `host` went into the libvirt URI
+  unchecked, so a value such as `virtops@h:22/system?command=/path/x&x=` made libvirt start
+  `/path/x` instead of ssh, `--plan` included. `user` and `host` are now validated and the key path
+  is percent-encoded in the URI.
+- The hypervisors' SSH host keys were never checked (`no_verify=1`), so anyone on the network path
+  could pose as a hypervisor. They are now checked against `known_hosts` by default.
+
 ## [0.4.0] - 2026-09-29
 
 ### Upgrading from 0.3.0

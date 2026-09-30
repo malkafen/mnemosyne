@@ -21,7 +21,14 @@ public class Mnemon {
   @NotBlank(message = "Group name must not be blank")
   private String group;
 
+  // user and host end up in the libvirt URI as they are: a '?', '&' or '/' in either would add
+  // URI parameters of its own (command= runs a program locally), so both are held to their syntax.
   @NotBlank(message = "User must not be blank")
+  @Pattern(
+      regexp = "^[A-Za-z_][A-Za-z0-9_.-]{0,31}$",
+      message =
+          "User must be a user name: letters, digits, '_', '.' and '-', not starting with a digit,"
+              + " '.' or '-', 32 characters at most")
   private String user;
 
   @NotBlank(message = "SSH key path must not be blank")
@@ -32,6 +39,7 @@ public class Mnemon {
   private int port;
 
   @NotBlank(message = "Host must not be blank")
+  @Pattern(regexp = Server.HOSTNAME_PATTERN, message = "Host " + Server.HOSTNAME_MESSAGE)
   private String host;
 
   @jakarta.validation.Valid @com.fasterxml.jackson.annotation.JsonMerge

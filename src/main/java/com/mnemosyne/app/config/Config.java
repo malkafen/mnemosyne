@@ -59,6 +59,20 @@ public class Config {
   private boolean purgeDisks = false;
 
   /**
+   * Turns off the check of the hypervisors' SSH host keys against known_hosts.
+   *
+   * <p>Off by default: without the check anyone on the network path can pose as the hypervisor and
+   * receive the key-authenticated session. Meant for a throwaway lab whose hosts are rebuilt too
+   * often to keep known_hosts current.
+   */
+  @Option(
+      names = "--no-verify",
+      description =
+          "Do not verify the hypervisors' SSH host keys against known_hosts. Unsafe outside a"
+              + " trusted lab.")
+  private boolean skipHostKeyCheck = false;
+
+  /**
    * How many VMs of one group are applied at once.
    *
    * <p>One by default, which is what every version before this one did. Applying several VMs at a
