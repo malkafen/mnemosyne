@@ -54,7 +54,7 @@ are git-ignored.
 | Field | Level | Default | Notes |
 | --- | --- | --- | --- |
 | `group` | group | required | Label only. |
-| `host`, `port`, `user`, `key` | group | required | SSH target of libvirt. Two groups with the same `host:port` are rejected. |
+| `host`, `port`, `user`, `key` | group | required | SSH target of libvirt. `host` is a host name or IPv4 address, `user` a user name (letters, digits, `_`, `.`, `-`); anything else is refused, since both go into the libvirt URI. The hypervisor's host key must be in `known_hosts` ([requirements](#requirements)). Two groups with the same `host:port` are rejected. |
 | `volLookup` | group / server | `noble-server-cloudimg-amd64.img` | Base cloud image; must exist in the VM's `pool`. |
 | `metaUrl` | group / server | `http://127.0.0.1:80/files/` — **set it** | Base URL of the [seed server](cloud-init.md#the-seed-server), `http://<this host>:8080/cloud-init/`. |
 | `templates` | group / server | `/app/templates/*` | Merged key by key over the defaults, see [templates](#templates). |
@@ -93,6 +93,7 @@ none of it.
 | `--no-delete` | Keep managed domains that are absent from the inventory | off |
 | `--purge-disks` | When deleting a VM, also delete volumes Mnemosyne did not create — an adopted VM's disks, disks attached by hand, reused volumes. A volume another domain uses is still kept | off |
 | `--parallel <n>` | How many VMs of a group to apply at once ([details](how-it-works.md#applying)) | `1` |
+| `--no-verify` | Do not verify the hypervisors' SSH host keys against `known_hosts`. Anyone on the network path can then pose as a hypervisor; meant for a throwaway lab only | off |
 | `-v`, `--verbose` | Debug logging, including full stack traces | off |
 | `-h`, `--help`, `-V`, `--version` | Usage and version | — |
 
@@ -141,8 +142,11 @@ Which values Mnemosyne fills in and which are passed through is described, with 
 
 **Machine running Mnemosyne:** Java 17+ (Maven to build), the libvirt client libraries
 (`libvirt0`, `libvirt-clients`, `libvirt-dev`) for JNA, an OpenSSH client, an SSH key accepted by
-each hypervisor, and port 8080 reachable from the guests. The Docker image contains everything but
-the key; run it with `--network host` so the guests can reach port 8080.
+each hypervisor, each hypervisor's host key in `known_hosts` (for a port other than 22 the entry is
+`[host]:port`; `ssh -p <port> <user>@<host>` once, or `ssh-keyscan`, adds it), and port 8080
+reachable from the guests. An unknown or changed host key fails the connection rather than
+prompting. The Docker image contains everything but the key and `known_hosts`; mount `~/.ssh` and
+run it with `--network host` so the guests can reach port 8080.
 
 **Each hypervisor:** libvirt with KVM/QEMU reachable over SSH as `user`, a running storage pool
 holding the base cloud image named by `volLookup`, and a running libvirt network named by

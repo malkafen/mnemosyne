@@ -90,9 +90,10 @@ public class Harmonia implements AutoCloseable {
   /** Numbers the phase workers, so a log line says which VM a thread was busy with. */
   private static final AtomicInteger workerCount = new AtomicInteger();
 
-  public Harmonia(String group, String user, String key, String host, int port)
+  public Harmonia(
+      String group, String user, String key, String host, int port, boolean skipHostKeyCheck)
       throws LibvirtException, IOException {
-    this(group, Hypervisor.connect(user, key, host, port));
+    this(group, Hypervisor.connect(user, key, host, port, skipHostKeyCheck));
   }
 
   /** Everything this class does goes through one connection; opening it is the only other step. */

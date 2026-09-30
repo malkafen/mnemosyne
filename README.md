@@ -31,7 +31,8 @@ difference and applies it.
 > — use them instead of building from source.
 
 Requirements — here: Java 17+, Maven, the libvirt client libraries (`libvirt0`,
-`libvirt-clients`, `libvirt-dev`) and an SSH key the hypervisors accept. On each hypervisor:
+`libvirt-clients`, `libvirt-dev`), an SSH key the hypervisors accept and their host keys in
+`known_hosts` (connect with `ssh` once). On each hypervisor:
 libvirt/KVM reachable over SSH, a storage pool holding a base cloud image (e.g. a Debian
 `genericcloud` qcow2) and a libvirt network the guests can reach this machine's port `8080` from.
 
