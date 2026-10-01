@@ -65,8 +65,28 @@ docker build -t mnemosyne .
 docker run --rm --network host \
   -v "$PWD/configs:/app/configs" \
   -v "$HOME/.ssh:/root/.ssh:ro" \
-  mnemosyne -f /app/configs/servers.yml --plan
+  -e MNEM_SERVERS_FILE=/app/configs/servers.yml \
+  -e MNEM_KEY=/root/.ssh/id_ed25519 \
+  mnemosyne --plan
 ```
+
+`MNEM_SERVERS_FILE`, `MNEM_KEY`, `MNEM_HTTP_PORT`, `MNEM_PARALLEL` and `MNEM_NO_VERIFY` stand in
+for their flags; a flag given on the command line wins
+([command line](docs/configuration.md#command-line)).
+
+Or with Docker Compose, which keeps those settings in `.env`:
+
+```bash
+cp .env.example .env && $EDITOR .env    # inventory file, SSH key, known_hosts, MNEM_* settings
+docker compose build
+docker compose run --rm mnemosyne --plan
+docker compose run --rm mnemosyne        # apply
+```
+
+[`compose.yml`](compose.yml) runs on the host network, so the guests reach the seed server on
+`MNEM_HTTP_PORT`. It mounts the inventory as one file at `/etc/mnemosyne/servers.yml`, `./templates`
+at `/app/templates` (the inventory picks the files) and the SSH key at `/run/secrets/hv_key`.
+`.env` is git-ignored; what a run does (`--plan`, `--join`, ...) goes after the service name.
 
 A plan looks like this ([more output examples](docs/output.md)):
 

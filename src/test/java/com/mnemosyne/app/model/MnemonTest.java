@@ -62,4 +62,21 @@ public class MnemonTest {
     assertThat(result.get(0).getServers().get("core-db-test-b.example.lan").getExtraDisks())
         .isEmpty();
   }
+
+  @Test
+  void loadMnemones_groupWithoutAKey_takesTheDefaultOne() throws IOException {
+    // --key / MNEM_KEY fill in only what the inventory leaves out: a group's own key wins.
+    // Arrange
+    Config config = mock(Config.class);
+    String testFile =
+        getClass().getClassLoader().getResource("test-servers-default-key.yml").getPath();
+    when(config.getServersPath()).thenReturn(testFile);
+    when(config.getKey()).thenReturn("/keys/default");
+    // Act
+    List<Mnemon> result = Mnemon.loadMnemones(config);
+    // Assert
+    assertThat(result)
+        .extracting(Mnemon::getKey)
+        .containsExactly("/own/id_ed25519", "/keys/default");
+  }
 }
