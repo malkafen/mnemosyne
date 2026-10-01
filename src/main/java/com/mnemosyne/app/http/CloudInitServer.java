@@ -24,7 +24,6 @@ import org.slf4j.LoggerFactory;
 public class CloudInitServer {
 
   private static HttpServer server;
-  private static final int PORT = 8080;
   private static final String CONTEXT_PATH = "/cloud-init";
   private static final int HTTP_WORKERS = 4;
   private static final long POLL_INTERVAL_MS = 5000L;
@@ -125,8 +124,8 @@ public class CloudInitServer {
     }
   }
 
-  public static void start() throws IOException {
-    server = HttpServer.create(new InetSocketAddress(PORT), 0);
+  public static void start(int port) throws IOException {
+    server = HttpServer.create(new InetSocketAddress(port), 0);
     server.createContext(CONTEXT_PATH, new CloudInitHandler());
     httpWorkers =
         Executors.newFixedThreadPool(
@@ -138,7 +137,7 @@ public class CloudInitServer {
             });
     server.setExecutor(httpWorkers);
     server.start();
-    log.info("Cloud-Init server is running on port '{}'", PORT);
+    log.info("Cloud-Init server is running on port '{}'", port);
   }
 
   public static void stop() {

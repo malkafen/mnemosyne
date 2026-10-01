@@ -92,7 +92,7 @@ Consequences worth knowing:
 
 ## The seed server
 
-- Listens on port **8080**, path **`/cloud-init`**, started only when applying — `--plan` never
+- Listens on port **8080** (`--http-port` / `MNEM_HTTP_PORT`), path **`/cloud-init`**, started only when applying — `--plan` never
   binds the port.
 - URLs have the form `/cloud-init/<name>/<token>/<file>`. A request with an unknown name **or** a
   wrong token is answered `404` in both cases, so a guess learns nothing; the token is compared in

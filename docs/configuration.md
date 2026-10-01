@@ -54,9 +54,9 @@ are git-ignored.
 | Field | Level | Default | Notes |
 | --- | --- | --- | --- |
 | `group` | group | required | Label only. |
-| `host`, `port`, `user`, `key` | group | required | SSH target of libvirt. `host` is a host name or IPv4 address, `user` a user name (letters, digits, `_`, `.`, `-`); anything else is refused, since both go into the libvirt URI. The hypervisor's host key must be in `known_hosts` ([requirements](#requirements)). Two groups with the same `host:port` are rejected. |
+| `host`, `port`, `user`, `key` | group | required; `key` may come from `--key` / `MNEM_KEY` | SSH target of libvirt. `host` is a host name or IPv4 address, `user` a user name (letters, digits, `_`, `.`, `-`); anything else is refused, since both go into the libvirt URI. The hypervisor's host key must be in `known_hosts` ([requirements](#requirements)). Two groups with the same `host:port` are rejected. |
 | `volLookup` | group / server | `noble-server-cloudimg-amd64.img` | Base cloud image; must exist in the VM's `pool`. |
-| `metaUrl` | group / server | `http://127.0.0.1:80/files/` — **set it** | Base URL of the [seed server](cloud-init.md#the-seed-server), `http://<this host>:8080/cloud-init/`. |
+| `metaUrl` | group / server | `http://127.0.0.1:80/files/` — **set it** | Base URL of the [seed server](cloud-init.md#the-seed-server), `http://<this host>:8080/cloud-init/` (the port is `--http-port`). |
 | `templates` | group / server | `/app/templates/*` | Merged key by key over the defaults, see [templates](#templates). |
 | `name` | server | the map key | Domain, volume and host name. Can be changed without recreating the VM. Must be an RFC 1123 host name (letters, digits, `-`, `.`); so must the map key. |
 | `cpu` | server | required | 1-128. Reconciled on every run, applied on the next boot. |
@@ -85,17 +85,31 @@ java -Djna.library.path=/usr/lib/x86_64-linux-gnu -jar target/mnemosyne-*.jar -f
 Debian/Ubuntu, `/usr/lib64` on RHEL/Fedora, `/opt/homebrew/lib` on macOS. The Docker image needs
 none of it.
 
-| Flag | Description | Default |
-| --- | --- | --- |
-| `-f`, `--servers-file <path>` | Path to the inventory YAML | `/etc/mnemosyne/servers.yml` |
-| `-p`, `--plan` | Print the plan and exit without applying | off |
-| `-j`, `--join` | [Adopt](how-it-works.md#adopting-existing-vms) matching unmanaged domains; create and delete nothing | off |
-| `--no-delete` | Keep managed domains that are absent from the inventory | off |
-| `--purge-disks` | When deleting a VM, also delete volumes Mnemosyne did not create — an adopted VM's disks, disks attached by hand, reused volumes. A volume another domain uses is still kept | off |
-| `--parallel <n>` | How many VMs of a group to apply at once ([details](how-it-works.md#applying)) | `1` |
-| `--no-verify` | Do not verify the hypervisors' SSH host keys against `known_hosts`. Anyone on the network path can then pose as a hypervisor; meant for a throwaway lab only | off |
-| `-v`, `--verbose` | Debug logging, including full stack traces | off |
-| `-h`, `--help`, `-V`, `--version` | Usage and version | — |
+| Flag | Environment | Description | Default |
+| --- | --- | --- | --- |
+| `-f`, `--servers-file <path>` | `MNEM_SERVERS_FILE` | Path to the inventory YAML | `/etc/mnemosyne/servers.yml` |
+| `--key <path>` | `MNEM_KEY` | Private SSH key of every group without a `key` of its own | none |
+| `--http-port <port>` | `MNEM_HTTP_PORT` | Port of the [seed server](cloud-init.md#the-seed-server); `metaUrl` must point at it | `8080` |
+| `-p`, `--plan` | — | Print the plan and exit without applying | off |
+| `-j`, `--join` | — | [Adopt](how-it-works.md#adopting-existing-vms) matching unmanaged domains; create and delete nothing | off |
+| `--no-delete` | — | Keep managed domains that are absent from the inventory | off |
+| `--purge-disks` | — | When deleting a VM, also delete volumes Mnemosyne did not create — an adopted VM's disks, disks attached by hand, reused volumes. A volume another domain uses is still kept | off |
+| `--parallel <n>` | `MNEM_PARALLEL` | How many VMs of a group to apply at once ([details](how-it-works.md#applying)) | `1` |
+| `--no-verify` | `MNEM_NO_VERIFY=true` | Do not verify the hypervisors' SSH host keys against `known_hosts`. Anyone on the network path can then pose as a hypervisor; meant for a throwaway lab only | off |
+| `-v`, `--verbose` | — | Debug logging, including full stack traces | off |
+| `-h`, `--help`, `-V`, `--version` | — | Usage and version | — |
+
+The settings of the place Mnemosyne runs in — a container image, a pod — can come from `MNEM_*`
+variables; what a single run does (`--plan`, `--join`, `--no-delete`, `--purge-disks`,
+`--verbose`) is given on the command line only. A flag wins over its variable, the variable wins
+over the default, and an empty variable counts as not set. A group's own `key` wins over `--key`
+and `MNEM_KEY`. `--verbose` logs every setting with where it came from:
+
+```
+Setting --servers-file = /cfg/servers.yml (MNEM_SERVERS_FILE)
+Setting --parallel = 4 (command line)
+Setting --http-port = 8080 (default)
+```
 
 ## Exit codes
 
@@ -144,7 +158,7 @@ Which values Mnemosyne fills in and which are passed through is described, with 
 (`libvirt0`, `libvirt-clients`, `libvirt-dev`) for JNA, an OpenSSH client, an SSH key accepted by
 each hypervisor, each hypervisor's host key in `known_hosts` (for a port other than 22 the entry is
 `[host]:port`; `ssh -p <port> <user>@<host>` once, or `ssh-keyscan`, adds it), and port 8080
-reachable from the guests. An unknown or changed host key fails the connection rather than
+(`--http-port`) reachable from the guests. An unknown or changed host key fails the connection rather than
 prompting. The Docker image contains everything but the key and `known_hosts`; mount `~/.ssh` and
 run it with `--network host` so the guests can reach port 8080.
 

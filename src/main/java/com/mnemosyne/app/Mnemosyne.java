@@ -19,6 +19,7 @@ import java.util.stream.Collectors;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import picocli.CommandLine;
+import picocli.CommandLine.Model.OptionSpec;
 import picocli.CommandLine.ParameterException;
 
 class Mnemosyne {
@@ -51,12 +52,15 @@ class Mnemosyne {
     System.setOut(new PrintStream(System.out, true, StandardCharsets.UTF_8));
 
     Config config = new Config();
-    CommandLine cmd = new CommandLine(config);
+    Config.EnvDefaults env = new Config.EnvDefaults(System::getenv);
+    CommandLine cmd = new CommandLine(config).setDefaultValueProvider(env);
 
     try {
       cmd.parseArgs(args);
     } catch (ParameterException e) {
-      cmd.getErr().println(e.getMessage());
+      // A bad value nobody typed is otherwise reported as if it had been an argument.
+      String variable = env.source(e.getArgSpec());
+      cmd.getErr().println(e.getMessage() + (variable == null ? "" : " (from " + variable + ")"));
       e.getCommandLine().usage(cmd.getErr()); // print usage
       System.exit(cmd.getCommandSpec().exitCodeOnInvalidInput()); // = 2
       return;
@@ -69,12 +73,19 @@ class Mnemosyne {
     }
 
     if (config.getParallel() < 1) {
-      cmd.getErr().println("--parallel must be at least 1");
-      System.exit(cmd.getCommandSpec().exitCodeOnInvalidInput()); // = 2
+      invalid(cmd, env, "--parallel", "must be at least 1");
       return;
     }
 
-    if (config.isVerbose()) enableDebugLogging();
+    if (config.getHttpPort() < 1 || config.getHttpPort() > 65535) {
+      invalid(cmd, env, "--http-port", "must be between 1 and 65535");
+      return;
+    }
+
+    if (config.isVerbose()) {
+      enableDebugLogging();
+      logSettings(cmd, env);
+    }
 
     try {
       int exitCode = new Mnemosyne().run(config);
@@ -132,7 +143,7 @@ class Mnemosyne {
               unjoined.size(), String.join(", ", unjoined));
         return EXIT_INCOMPLETE;
       }
-      CloudInitServer.start();
+      CloudInitServer.start(config.getHttpPort());
       confirmWindow();
 
       Report.heading("Applied");
@@ -236,6 +247,27 @@ class Mnemosyne {
         "Nothing was applied: %d of %d group(s) cannot be applied as planned.%n",
         blockedGroups, irides.size());
     throw new IllegalStateException("preflight failed");
+  }
+
+  /** Refuses a value out of range, naming the variable it came from when nobody typed it. */
+  private static void invalid(CommandLine cmd, Config.EnvDefaults env, String option, String rule) {
+    String variable = env.source(cmd.getCommandSpec().findOption(option));
+    cmd.getErr()
+        .println(option + " " + rule + (variable == null ? "" : " (from " + variable + ")"));
+    System.exit(cmd.getCommandSpec().exitCodeOnInvalidInput()); // = 2
+  }
+
+  /** What each option ended up as and who decided it, so an override can be seen, not guessed. */
+  private static void logSettings(CommandLine cmd, Config.EnvDefaults env) {
+    for (OptionSpec o : cmd.getCommandSpec().options()) {
+      if (o.usageHelp() || o.versionHelp()) continue;
+      String variable = env.source(o);
+      String source =
+          cmd.getParseResult().hasMatchedOption(o)
+              ? "command line"
+              : variable != null ? variable : "default";
+      log.debug("Setting {} = {} ({})", o.longestName(), o.getValue(), source);
+    }
   }
 
   private static void enableDebugLogging() {

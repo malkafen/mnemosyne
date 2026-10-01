@@ -8,6 +8,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - `--no-verify` turns off the check of the hypervisors' SSH host keys.
+- Settings from the environment for Docker and Kubernetes: `MNEM_SERVERS_FILE`, `MNEM_KEY`,
+  `MNEM_HTTP_PORT`, `MNEM_PARALLEL`, `MNEM_NO_VERIFY`. A flag wins over its variable; an empty
+  variable counts as not set. `--plan`, `--join`, `--no-delete`, `--purge-disks` and `--verbose`
+  stay command-line only.
+- `--key` / `MNEM_KEY`: the SSH key of every group without a `key` of its own.
+- `--http-port` / `MNEM_HTTP_PORT`: the seed server's port, until now fixed at 8080.
+- `compose.yml` and `.env.example` for running with Docker Compose; `.env` is git-ignored.
 
 ### Security
 - Inventory fields could run a local command: `user` and `host` went into the libvirt URI

@@ -1,0 +1,24 @@
+---
+# Test fixture for MnemonTest: one group names its own key, the other relies on --key / MNEM_KEY.
+# All data is fake.
+- group: "hv01-test.example.lan"
+  user: "virtops"
+  key: "/own/id_ed25519"
+  port: 22
+  host: "192.0.2.10"
+  metaUrl: "http://192.0.2.5:8080/cloud-init/"
+  servers:
+    "web-01.example.lan":
+      cpu: 2
+      ram: 2048
+      ip: "192.0.2.40/24"
+- group: "hv02-test.example.lan"
+  user: "virtops"
+  port: 22
+  host: "192.0.2.20"
+  metaUrl: "http://192.0.2.5:8080/cloud-init/"
+  servers:
+    "web-02.example.lan":
+      cpu: 2
+      ram: 2048
+      ip: "192.0.2.41/24"

@@ -1,0 +1,24 @@
+#   docker compose run --rm mnemosyne --plan     # what will change
+#   docker compose run --rm mnemosyne            # apply it
+services:
+  mnemosyne:
+    build: .
+    image: mnemosyne:local
+    # The guests fetch their cloud-init from this host on MNEM_HTTP_PORT.
+    network_mode: host
+    environment:
+      MNEM_KEY: ${MNEM_KEY:-}
+      MNEM_HTTP_PORT: ${MNEM_HTTP_PORT:-}
+      MNEM_PARALLEL: ${MNEM_PARALLEL:-}
+      MNEM_NO_VERIFY: ${MNEM_NO_VERIFY:-}
+    volumes:
+      # The inventory, at the path Mnemosyne reads by default.
+      - ${INVENTORY_FILE}:/etc/mnemosyne/servers.yml:ro
+      - ${KNOWN_HOSTS_FILE}:/root/.ssh/known_hosts:ro
+      - ./templates:/app/templates:ro
+    secrets:
+      - hv_key
+
+secrets:
+  hv_key:
+    file: ${HV_KEY_FILE}

@@ -15,3 +15,6 @@ configs/servers_dev.yml
 
 
 !**/*Dev*.java
+
+# Local compose settings — may name private hosts and keys. Start from .env.example
+.env

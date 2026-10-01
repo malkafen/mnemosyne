@@ -15,3 +15,5 @@ templates/*-dev.yml
 templates/*.example.yml
 
 README*.md
+
+.env

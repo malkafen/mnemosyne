@@ -22,13 +22,15 @@
   host: "192.0.2.10"                 # hypervisor address for the SSH/libvirt link
   user: "virtops"                    # SSH user on the hypervisor
   port: 22                           # SSH port (1-65535)
-  key: "/home/virtops/.ssh/id_ed25519"  # PRIVATE SSH key, absolute path ("~" is NOT expanded)
+  key: "/home/virtops/.ssh/id_ed25519"  # PRIVATE SSH key, absolute path ("~" is NOT expanded).
+                                     # Optional when --key / MNEM_KEY is set; this one wins.
 
   # Group defaults: `volLookup`, `metaUrl` and the `templates` block are declared
   # once here and inherited by every server below, which may still override them.
   volLookup: "debian-13-genericcloud-amd64.qcow2"   # base image in `pool` to clone new disks from
   # Base URL where the VMs reach Mnemosyne's cloud-init server. Must be reachable
-  # from INSIDE the guest — the Mnemosyne host IP, port 8080, path /cloud-init/.
+  # from INSIDE the guest — the Mnemosyne host IP, port 8080 (--http-port /
+  # MNEM_HTTP_PORT), path /cloud-init/.
   metaUrl: "http://192.0.2.5:8080/cloud-init/"
 
   servers:

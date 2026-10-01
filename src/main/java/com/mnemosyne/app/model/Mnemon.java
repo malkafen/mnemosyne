@@ -31,7 +31,7 @@ public class Mnemon {
               + " '.' or '-', 32 characters at most")
   private String user;
 
-  @NotBlank(message = "SSH key path must not be blank")
+  @NotBlank(message = "SSH key path must not be blank: set `key` in the group, --key or MNEM_KEY")
   private String key;
 
   @Min(value = 1, message = "Port must be >= 1")
@@ -81,6 +81,11 @@ public class Mnemon {
     log.debug("Loaded {} groups", mnemones.size());
 
     for (Mnemon m : mnemones) {
+      if (m.getKey() == null || m.getKey().isBlank()) {
+        m.setKey(config.getKey());
+        log.debug("Group '{}' uses the default SSH key {}", m.getGroup(), config.getKey());
+      }
+
       // Nothing to enrich, and nothing to report here: @NotNull on 'servers' does that
       // in the validation pass that follows.
       if (m.getServers() == null) continue;
