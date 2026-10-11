@@ -47,7 +47,7 @@ from **inside** the guest.
 
 | Term | Meaning |
 | --- | --- |
-| Mnemon | One hypervisor group: a libvirt host plus the map of VMs that belong on it. Top-level item of the inventory. |
+| Mnemon | One hypervisor group: a libvirt host plus the map of VMs that belong on it, which may be empty — a host that must hold none. Top-level item of the inventory. |
 | Server | One VM, that is, one libvirt domain. |
 | `serverId` | The inventory map key. Written into the domain's metadata, it is the only identity Mnemosyne matches on, so a VM can be renamed (`name:`) without being recreated. |
 | managed / unmanaged | A domain is managed when it carries `managedBy: mnemosyne` metadata. Anything else is unmanaged and never touched unless adopted with `--join`. |

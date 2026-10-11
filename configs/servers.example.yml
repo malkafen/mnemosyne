@@ -123,3 +123,19 @@
       #   metaDataTmpl: "/app/templates/meta-data.yml"
       #   userDataTmpl: "/app/templates/user-data.yml"
       #   networkConfigTmpl: "/app/templates/network-config.yml"
+
+# ----- Group 3: a hypervisor that must hold no VMs ---------------------------
+# `servers` may be left out, or written with nothing under it. The group is then
+# a host that holds none of Mnemosyne's VMs, and the next run deletes every
+# managed domain on it (unmanaged ones are left alone, as always).
+#
+# This is how a hypervisor is emptied. Deleting the group from this file instead
+# means Mnemosyne never connects to that host, so its VMs keep running, managed
+# by nothing and absent from every plan. The deletions are printed like any
+# other: check them with --plan first.
+- group: "hv03.example.lan"
+  host: "192.0.2.30"
+  user: "virtops"
+  port: 22
+  key: "/home/virtops/.ssh/id_ed25519"
+  servers:

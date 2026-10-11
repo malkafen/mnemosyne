@@ -64,6 +64,22 @@ public class MnemonTest {
   }
 
   @Test
+  void loadMnemones_groupWithoutServers_getsAnEmptyMap() throws IOException {
+    // A group may hold no VMs: it still describes the connection, and the host is brought down to
+    // zero managed VMs. Whether `servers` is absent or written empty makes no difference, and
+    // neither leaves a null behind for the plan to trip over.
+    // Arrange
+    Config config = mock(Config.class);
+    String testFile =
+        getClass().getClassLoader().getResource("test-servers-no-servers.yml").getPath();
+    when(config.getServersPath()).thenReturn(testFile);
+    // Act
+    List<Mnemon> result = Mnemon.loadMnemones(config);
+    // Assert
+    assertThat(result).hasSize(2).allSatisfy(m -> assertThat(m.getServers()).isEmpty());
+  }
+
+  @Test
   void loadMnemones_groupWithoutAKey_takesTheDefaultOne() throws IOException {
     // --key / MNEM_KEY fill in only what the inventory leaves out: a group's own key wins.
     // Arrange

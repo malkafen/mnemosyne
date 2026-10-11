@@ -51,6 +51,30 @@ public class PlanTest {
     assertThat(result.getUnmanaged()).containsExactly("neverToDelete", "toAdopt");
   }
 
+  @Test
+  void plan_noServersAtAll_deletesEveryManagedDomain() {
+    // A group emptied down to zero VMs. Only what Mnemosyne manages goes: an unmanaged domain is
+    // still somebody else's, whether the inventory lists anything on that host or not.
+    // Arrange
+    List<DomainState> actual = TestData.sampleDomainStates();
+    // Act
+    Plan result = new Plan(actual, Map.of(), false);
+    // Assert
+    assertThat(result.getToDelete().keySet()).containsExactly("toDelete-vm", "toUpdate");
+    assertThat(result.getToCreate()).isEmpty();
+    assertThat(result.getToUpdate()).isEmpty();
+    assertThat(result.getToAdopt()).isEmpty();
+    assertThat(result.getUnmanaged()).containsExactly("neverToDelete", "toAdopt");
+  }
+
+  @Test
+  void plan_noServersAtAll_withDeleteDisable_deletesNothing() {
+    // Act
+    Plan result = new Plan(TestData.sampleDomainStates(), Map.of(), true);
+    // Assert
+    assertThat(result.getToDelete()).isEmpty();
+  }
+
   private static Server server(int cpu, long ram) {
     Server s = new Server();
     s.setId("web-01");

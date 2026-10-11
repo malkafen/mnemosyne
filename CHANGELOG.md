@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- A group may hold no VMs: `servers` can be left out or written empty, where an inventory used to
+  be refused with "Server list must not be empty". The group still describes the connection, and
+  the run brings that hypervisor down to zero managed domains. Until now the only way to empty a
+  host was to delete its group, which stops Mnemosyne from connecting to it at all and leaves its
+  VMs running, managed by nothing and absent from every plan. The deletions are listed in the plan
+  like any other, and `--no-delete` still skips them.
 - `--no-verify` turns off the check of the hypervisors' SSH host keys.
 - Settings from the environment for Docker and Kubernetes: `MNEM_SERVERS_FILE`, `MNEM_KEY`,
   `MNEM_HTTP_PORT`, `MNEM_PARALLEL`, `MNEM_NO_VERIFY`. A flag wins over its variable; an empty

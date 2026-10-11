@@ -1,12 +1,16 @@
 package com.mnemosyne.app.model;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.cfg.CoercionAction;
+import com.fasterxml.jackson.databind.cfg.CoercionInputShape;
+import com.fasterxml.jackson.databind.type.LogicalType;
 import com.fasterxml.jackson.dataformat.yaml.YAMLFactory;
 import com.mnemosyne.app.config.*;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.*;
 import java.io.File;
 import java.io.IOException;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import lombok.Getter;
@@ -52,10 +56,21 @@ public class Mnemon {
   @Pattern(regexp = "^https?://.+", message = "metaUrl must be a valid HTTP/HTTPS URL")
   private String metaUrl = "http://127.0.0.1:80/files/";
 
-  @NotNull(message = "Server list must not be null")
-  @Size(min = 1, message = "Server list must not be empty")
-  @Valid
-  private Map<String, Server> servers;
+  /**
+   * The VMs this hypervisor must hold, keyed by server id.
+   *
+   * <p>An absent, empty or null {@code servers} block is a group of no VMs, not a mistake: it
+   * describes the connection and says the host must hold nothing of Mnemosyne's, so an existing
+   * group can be emptied down to zero VMs instead of being deleted from the inventory — which would
+   * leave its VMs behind, unmanaged and unmentioned. The deletions it implies are in the plan like
+   * any other, so nothing is removed that was not printed first.
+   */
+  @Valid private Map<String, Server> servers = new LinkedHashMap<>();
+
+  /** Kept non-null whatever the YAML says, because every reader iterates it unguarded. */
+  public void setServers(Map<String, Server> servers) {
+    this.servers = servers == null ? new LinkedHashMap<>() : servers;
+  }
 
   private static final Logger log = LoggerFactory.getLogger(Mnemon.class);
 
@@ -67,6 +82,12 @@ public class Mnemon {
     loaderOptions.setAllowDuplicateKeys(false);
     ObjectMapper mapper =
         new ObjectMapper(YAMLFactory.builder().loaderOptions(loaderOptions).build());
+    // `servers:` with nothing under it is an empty scalar, which Jackson otherwise refuses rather
+    // than reads as the empty map it means. A group of no VMs has to be writable that way: the
+    // alternative is `servers: {}`, which nobody types by hand.
+    mapper
+        .coercionConfigFor(LogicalType.Map)
+        .setCoercion(CoercionInputShape.EmptyString, CoercionAction.AsEmpty);
 
     File file = new File(path);
     List<Mnemon> mnemones =
@@ -86,9 +107,15 @@ public class Mnemon {
         log.debug("Group '{}' uses the default SSH key {}", m.getGroup(), config.getKey());
       }
 
-      // Nothing to enrich, and nothing to report here: @NotNull on 'servers' does that
-      // in the validation pass that follows.
-      if (m.getServers() == null) continue;
+      // A group may legitimately hold no VMs; it still connects, so that whatever Mnemosyne
+      // manages on that host is deleted.
+      if (m.getServers().isEmpty()) {
+        log.info(
+            "Group '{}' has no servers: all managed VMs on {} will be deleted",
+            m.getGroup(),
+            m.getHost());
+        continue;
+      }
 
       Templates groupTmpl = m.getTemplates();
       m.getServers()
