@@ -1,0 +1,16 @@
+---
+# Test fixture for MnemonTest: a group emptied down to zero VMs. The first one leaves `servers`
+# out altogether, the second writes the key with nothing under it. All data is fake.
+- group: "hv01-test.example.lan"
+  user: "virtops"
+  key: "./templates/id_ed25519"
+  port: 22
+  host: "192.0.2.10"
+  metaUrl: "http://192.0.2.5:8080/cloud-init/"
+- group: "hv02-test.example.lan"
+  user: "virtops"
+  key: "./templates/id_ed25519"
+  port: 22
+  host: "192.0.2.20"
+  metaUrl: "http://192.0.2.5:8080/cloud-init/"
+  servers:
