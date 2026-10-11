@@ -58,6 +58,7 @@ are git-ignored.
 | `volLookup` | group / server | `noble-server-cloudimg-amd64.img` | Base cloud image; must exist in the VM's `pool`. |
 | `metaUrl` | group / server | `http://127.0.0.1:80/files/` — **set it** | Base URL of the [seed server](cloud-init.md#the-seed-server), `http://<this host>:8080/cloud-init/` (the port is `--http-port`). |
 | `templates` | group / server | `/app/templates/*` | Merged key by key over the defaults, see [templates](#templates). |
+| `servers` | group | none | The VMs of this hypervisor, keyed by server id. May be left out or written empty — the group then holds no VMs, see [a group of no VMs](#a-group-of-no-vms). |
 | `name` | server | the map key | Domain, volume and host name. Can be changed without recreating the VM. Must be an RFC 1123 host name (letters, digits, `-`, `.`); so must the map key. |
 | `cpu` | server | required | 1-128. Reconciled on every run, applied on the next boot. |
 | `ram` | server | required | MiB, 256-1048576. Same as `cpu`. |
@@ -74,6 +75,27 @@ are git-ignored.
 the first boot: changing them later does not reconfigure an existing guest.
 
 When running in Docker, `key` and template paths are paths **inside the container**.
+
+### A group of no VMs
+
+`servers` may be left out, or written with nothing under it. The group is then a hypervisor that
+must hold none of Mnemosyne's VMs, and the next run deletes every managed domain on it:
+
+```yaml
+- group: "hv03.example.lan"
+  host: "192.0.2.30"
+  user: "virtops"
+  port: 22
+  key: "/home/virtops/.ssh/id_ed25519"
+  servers:
+```
+
+This is how a hypervisor is emptied. Deleting the group from the inventory instead stops Mnemosyne
+from connecting to that host at all, so its VMs are left running, managed by nothing and absent
+from every plan. Unmanaged domains are not touched either way.
+
+The deletions are printed like any other: run `--plan` first, and `--no-delete` leaves them in
+place.
 
 ## Command line
 

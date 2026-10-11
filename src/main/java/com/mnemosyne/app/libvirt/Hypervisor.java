@@ -33,7 +33,7 @@ public class Hypervisor {
           public void errorCallback(Object userData, virError error) {}
         });
 
-    log.info("Connection to '{}' was successful.", host);
+    log.debug("Connected to '{}'", host);
     return connect;
   }
 
