@@ -16,10 +16,6 @@ import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
-/**
- * A server's name is the libvirt domain, the guest's host name, the volume file and a path segment
- * of the seed URL all at once. The inventory is the only place where one rule can cover all four.
- */
 @DisplayName("Server name and id validation")
 public class ServerNameValidationTest {
 
@@ -89,7 +85,6 @@ public class ServerNameValidationTest {
   @ParameterizedTest(name = "{0}")
   @MethodSource("badNames")
   void anIdThatIsNotAHostNameIsRejected(String label, String value) {
-    // Without `name` the id is the domain name, so it is held to the same rule.
     assertThat(violations(server(value, null))).contains("id");
   }
 }

@@ -39,10 +39,6 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
-/**
- * The life of {@code <mnem:init>} through the reconciler: defined pending, turned finished by the
- * guest's phone_home and nothing else, and written adopted by {@code --join}.
- */
 @ExtendWith(MockitoExtension.class)
 @DisplayName("Harmonia, init marker")
 public class HarmoniaInitTest {
@@ -95,7 +91,6 @@ public class HarmoniaInitTest {
     return s;
   }
 
-  /** Creates qa-a on an empty host, its root volume already in the pool; returns the XML. */
   private String create() throws LibvirtException {
     when(connect.listAllDomains(0)).thenReturn(new Domain[0]);
     when(connect.storagePoolLookupByName("default")).thenReturn(pool);
@@ -116,7 +111,6 @@ public class HarmoniaInitTest {
     HttpExchange exchange = mock(HttpExchange.class);
     when(exchange.getRequestURI())
         .thenReturn(URI.create("/cloud-init/qa-a/" + token + "/phone-home"));
-    // A refused token is answered before the method or the body are looked at.
     lenient().when(exchange.getRequestMethod()).thenReturn("POST");
     lenient().when(exchange.getRequestBody()).thenReturn(new ByteArrayInputStream(new byte[0]));
     lenient().when(exchange.getResponseHeaders()).thenReturn(new Headers());
@@ -130,16 +124,13 @@ public class HarmoniaInitTest {
   @Test
   void aNewDomainIsDefinedPending_andItsPhoneHomeMakesItFinished_keepingTheDiskRecords()
       throws Exception {
-    // Arrange
     String defined = create();
     InitMarker pending = XmlUtil.getShortState(defined).init();
     assertThat(pending.isPending()).isTrue();
     assertThat(defined).contains("/cloud-init/qa-a/" + pending.token() + "/");
     when(connect.domainLookupByName("qa-a")).thenReturn(domain);
     when(domain.isActive()).thenReturn(1);
-    // Act
     int status = phoneHome(pending.token());
-    // Assert
     assertThat(status).isEqualTo(200);
     ArgumentCaptor<String> meta = ArgumentCaptor.forClass(String.class);
     verify(domain)
@@ -164,11 +155,8 @@ public class HarmoniaInitTest {
 
   @Test
   void aPhoneHomeWithAnotherToken_leavesTheDomainPending() throws Exception {
-    // Arrange
     create();
-    // Act
     int status = phoneHome("f".repeat(32));
-    // Assert
     assertThat(status).isEqualTo(404);
     verify(domain, never()).setMetadata(anyInt(), anyString(), anyString(), anyString(), anyInt());
     assertThat(CloudInitServer.initialized("qa-a")).isFalse();
@@ -176,19 +164,15 @@ public class HarmoniaInitTest {
 
   @Test
   void aFailedWrite_isAnswered500_andTheGuestIsNotCountedAsDone() throws Exception {
-    // Arrange
     InitMarker pending = XmlUtil.getShortState(create()).init();
     when(connect.domainLookupByName("qa-a")).thenThrow(mock(LibvirtException.class));
-    // Act
     int status = phoneHome(pending.token());
-    // Assert
     assertThat(status).isEqualTo(500);
     assertThat(CloudInitServer.initialized("qa-a")).isFalse();
   }
 
   @Test
   void joinWritesAdopted_withoutAToken() throws Exception {
-    // Arrange: an unmanaged domain of the inventory's name
     when(connect.listAllDomains(0)).thenReturn(new Domain[] {domain});
     when(domain.getXMLDesc(Domain.XMLFlags.INACTIVE))
         .thenReturn(
@@ -198,9 +182,7 @@ public class HarmoniaInitTest {
     when(domain.isActive()).thenReturn(0);
     Harmonia harmonia = new Harmonia("bm05", connect);
     harmonia.plan(Map.of("qa-a", server()), false);
-    // Act
     harmonia.join(1);
-    // Assert
     ArgumentCaptor<String> meta = ArgumentCaptor.forClass(String.class);
     verify(domain).setMetadata(anyInt(), meta.capture(), eq("mnem"), eq(XmlUtil.MNEM_NS), anyInt());
     DomainState adopted =

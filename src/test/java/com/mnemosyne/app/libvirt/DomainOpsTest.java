@@ -46,13 +46,10 @@ public class DomainOpsTest {
 
     @Test
     void joinDomain_inactiveDomain_injectsMnemNamespaceWithConfigFlag() throws LibvirtException {
-      // Arrange
       when(connect.domainLookupByName("toAdopt")).thenReturn(domain);
       when(domain.isActive()).thenReturn(0);
       DomainOps domainOps = new DomainOps(connect);
-      // Act
       boolean result = domainOps.joinDomain("toAdopt", "<mnemosyne/>");
-      // Assert
       assertThat(result).isTrue();
 
       verify(domain)
@@ -68,13 +65,10 @@ public class DomainOpsTest {
 
     @Test
     void joinDomain_activeDomain_usesConfigAndLiveFlags() throws LibvirtException {
-      // Arrange
       when(connect.domainLookupByName("toAdopt")).thenReturn(domain);
       when(domain.isActive()).thenReturn(1);
       DomainOps domainOps = new DomainOps(connect);
-      // Act
       boolean result = domainOps.joinDomain("toAdopt", "<mnemosyne/>");
-      // Assert
       assertThat(result).isTrue();
 
       verify(domain)
@@ -92,40 +86,31 @@ public class DomainOpsTest {
   class DestroyDomain {
     @Test
     void destroyDomain_activeDomain_destroysAndFreesHandle() throws LibvirtException {
-      // Arrange
       when(connect.domainLookupByName("toDelete")).thenReturn(domain);
       when(domain.isActive()).thenReturn(1);
       DomainOps domainOps = new DomainOps(connect);
-      // Act
       domainOps.destroyDomain("toDelete");
-      // Assert
       verify(domain).destroy();
       verify(domain).free();
     }
 
     @Test
     void destroyDomain_inactiveDomain_skipsDestroyButFreesHandle() throws LibvirtException {
-      // Arrange
       when(connect.domainLookupByName("toDelete")).thenReturn(domain);
       when(domain.isActive()).thenReturn(0);
       DomainOps domainOps = new DomainOps(connect);
-      // Act
       domainOps.destroyDomain("toDelete");
-      // Assert
       verify(domain, never()).destroy();
       verify(domain).free();
     }
 
     @Test
     void destroyDomain_destroyFails_rethrowsAndStillFreesHandle() throws LibvirtException {
-      // Arrange
       when(connect.domainLookupByName("toDelete")).thenReturn(domain);
       when(domain.isActive()).thenReturn(1);
       DomainOps domainOps = new DomainOps(connect);
       LibvirtException boom = mock(LibvirtException.class);
-      // Act
       doThrow(boom).when(domain).destroy();
-      // Assert
       assertThatThrownBy(() -> domainOps.destroyDomain("toDelete")).isSameAs(boom);
       verify(domain).free();
     }
@@ -137,26 +122,20 @@ public class DomainOpsTest {
 
     @Test
     void undefineDomain_undefinesAndFreesHandle() throws LibvirtException {
-      // Arrange
       when(connect.domainLookupByName("toDelete")).thenReturn(domain);
       DomainOps domainOps = new DomainOps(connect);
-      // Act
       domainOps.undefineDomain("toDelete");
-      // Assert
       verify(domain).undefine();
       verify(domain).free();
     }
 
     @Test
     void undefineDomain_undefineFails_rethrowsAndStillFreesHandle() throws LibvirtException {
-      // Arrange
       when(connect.domainLookupByName("toDelete")).thenReturn(domain);
       DomainOps domainOps = new DomainOps(connect);
       LibvirtException boom = mock(LibvirtException.class);
       doThrow(boom).when(domain).undefine();
-      // Act
       assertThatThrownBy(() -> domainOps.undefineDomain("toDelete")).isSameAs(boom);
-      // Assert
       verify(domain).free();
     }
   }
@@ -167,22 +146,18 @@ public class DomainOpsTest {
 
     @Test
     void updateRam_redefinesPersistentConfigWithPatchedXml() throws Exception {
-      // Arrange
       Domain redefined = mock(Domain.class);
       when(connect.domainLookupByName("test-vm.example.net")).thenReturn(domain);
       when(domain.getXMLDesc(Domain.XMLFlags.INACTIVE)).thenReturn(loadXml("managed-domain.xml"));
       when(connect.domainDefineXML(anyString())).thenReturn(redefined);
       DomainOps domainOps = new DomainOps(connect);
-      // Act
       boolean result = domainOps.updateRam("test-vm.example.net", 4096);
-      // Assert
       assertThat(result).isTrue();
 
       ArgumentCaptor<String> xml = ArgumentCaptor.forClass(String.class);
       verify(connect).domainDefineXML(xml.capture());
       assertThat(XmlUtil.getShortState(xml.getValue()).ram()).isEqualTo(4096);
 
-      // The fixture starts at 2 GiB; the rest of the domain must survive the patch.
       assertThat(XmlUtil.getShortState(xml.getValue()).serverId()).isEqualTo("test-vm.example.net");
       assertThat(XmlUtil.getShortState(xml.getValue()).cpu()).isEqualTo(2);
 
@@ -192,27 +167,21 @@ public class DomainOpsTest {
 
     @Test
     void updateRam_readsStoredConfigNotLiveState() throws Exception {
-      // INACTIVE is what keeps a running domain's live memory untouched.
-      // Arrange
       when(connect.domainLookupByName("test-vm.example.net")).thenReturn(domain);
       when(domain.getXMLDesc(Domain.XMLFlags.INACTIVE)).thenReturn(loadXml("managed-domain.xml"));
       when(connect.domainDefineXML(anyString())).thenReturn(mock(Domain.class));
       DomainOps domainOps = new DomainOps(connect);
-      // Act
       domainOps.updateRam("test-vm.example.net", 4096);
-      // Assert
       verify(domain).getXMLDesc(Domain.XMLFlags.INACTIVE);
     }
 
     @Test
     void updateRam_defineFails_rethrowsAndStillFreesHandle() throws Exception {
-      // Arrange
       when(connect.domainLookupByName("test-vm.example.net")).thenReturn(domain);
       when(domain.getXMLDesc(anyInt())).thenReturn(loadXml("managed-domain.xml"));
       LibvirtException boom = mock(LibvirtException.class);
       doThrow(boom).when(connect).domainDefineXML(anyString());
       DomainOps domainOps = new DomainOps(connect);
-      // Act & Assert
       assertThatThrownBy(() -> domainOps.updateRam("test-vm.example.net", 4096)).isSameAs(boom);
       verify(domain).free();
     }
@@ -224,25 +193,19 @@ public class DomainOpsTest {
 
     @Test
     void startDomain_bootsDomainAndFreesHandle() throws LibvirtException {
-      // Arrange
       when(connect.domainLookupByName("web-01")).thenReturn(domain);
       DomainOps domainOps = new DomainOps(connect);
-      // Act
       domainOps.startDomain("web-01");
-      // Assert
       verify(domain).create();
       verify(domain).free();
     }
 
     @Test
     void shutdownDomain_inactiveDomain_asksForNothing() throws LibvirtException {
-      // Arrange
       when(connect.domainLookupByName("web-01")).thenReturn(domain);
       when(domain.isActive()).thenReturn(0);
       DomainOps domainOps = new DomainOps(connect);
-      // Act
       domainOps.shutdownDomain("web-01");
-      // Assert
       verify(domain, never()).shutdown();
       verify(domain, never()).destroy();
       verify(domain).free();
@@ -250,14 +213,10 @@ public class DomainOpsTest {
 
     @Test
     void shutdownDomain_guestStopsInTime_isNotDestroyed() throws LibvirtException {
-      // Running at first, shut off on the next poll: the guest obeyed, so no hard destroy.
-      // Arrange
       when(connect.domainLookupByName("web-01")).thenReturn(domain);
       when(domain.isActive()).thenReturn(1, 0);
       DomainOps domainOps = new DomainOps(connect);
-      // Act
       domainOps.shutdownDomain("web-01");
-      // Assert
       verify(domain).shutdown();
       verify(domain, never()).destroy();
       verify(domain).free();
@@ -265,26 +224,21 @@ public class DomainOpsTest {
 
     @Test
     void updateAutostart_setsFlagAndFreesHandle() throws LibvirtException {
-      // Arrange
       when(connect.domainLookupByName("web-01")).thenReturn(domain);
       DomainOps domainOps = new DomainOps(connect);
-      // Act
       domainOps.updateAutostart("web-01", true);
-      // Assert
       verify(domain).setAutostart(true);
       verify(domain).free();
     }
 
     @Test
     void setupDomain_autostartFails_undefinesTheDomainItJustDefined() throws LibvirtException {
-      // Arrange
       when(connect.domainDefineXML(anyString())).thenReturn(domain);
       when(connect.domainLookupByName("web-01")).thenReturn(domain);
       LibvirtException boom = mock(LibvirtException.class);
       doThrow(boom).when(domain).setAutostart(true);
       DomainOps domainOps = new DomainOps(connect);
       DomainOps.DomainSpec spec = new DomainOps.DomainSpec("web-01", "<domain/>", true, true);
-      // Act & Assert
       assertThatThrownBy(() -> domainOps.setupDomain(spec)).isSameAs(boom);
       verify(domain).undefine();
       verify(domain, never()).create();
@@ -297,14 +251,11 @@ public class DomainOpsTest {
 
     @Test
     void readActualState_managedDomain_mapsXmlToShortState() throws Exception {
-      // Arrange
       when(connect.listAllDomains(anyInt())).thenReturn(domains);
       when(domain.getXMLDesc(anyInt())).thenReturn(loadXml("managed-domain.xml"));
       DomainOps domainOps = new DomainOps(connect);
-      // Act
       List<DomainState> actual = domainOps.readActualState();
 
-      // Assert
       assertThat(actual).hasSize(1);
 
       assertThat(actual.get(0).name()).isEqualTo("test-vm.example.net");
@@ -319,41 +270,31 @@ public class DomainOpsTest {
 
     @Test
     void readActualState_attachesPowerStateAndAutostart() throws Exception {
-      // Neither fact is in the domain XML; both come off the domain handle.
-      // Arrange
       when(connect.listAllDomains(anyInt())).thenReturn(domains);
       when(domain.getXMLDesc(anyInt())).thenReturn(loadXml("managed-domain.xml"));
       when(domain.isActive()).thenReturn(1);
       when(domain.getAutostart()).thenReturn(true);
       DomainOps domainOps = new DomainOps(connect);
-      // Act
       List<DomainState> actual = domainOps.readActualState();
-      // Assert
       assertThat(actual.get(0).active()).isTrue();
       assertThat(actual.get(0).autostart()).isTrue();
     }
 
     @Test
     void readActualState_noDomains_returnsEmptyList() throws LibvirtException {
-      // Arrange
       when(connect.listAllDomains(anyInt())).thenReturn(new Domain[] {});
       DomainOps domainOps = new DomainOps(connect);
-      // Act
       List<DomainState> actual = domainOps.readActualState();
-      // Assert
       assertThat(actual).isEmpty();
     }
 
     @Test
     void readActualState_getXmlDescFails_rethrowsAndStillFreesAllHandles() throws LibvirtException {
-      // Arrange
       when(connect.listAllDomains(anyInt())).thenReturn(domains);
       LibvirtException boom = mock(LibvirtException.class);
       DomainOps domainOps = new DomainOps(connect);
       doThrow(boom).when(domain).getXMLDesc(anyInt());
-      // Act
       assertThatThrownBy(() -> domainOps.readActualState()).isSameAs(boom);
-      // Assert
       verify(domains[0]).free();
     }
   }
@@ -363,40 +304,31 @@ public class DomainOpsTest {
   class GetDiskPaths {
     @Test
     void getDiskPaths_domainWithDisks_returnsPaths() throws Exception {
-      // Arrange
       when(connect.domainLookupByName("toLookup")).thenReturn(domain);
       when(domain.getXMLDesc(anyInt())).thenReturn(loadXml("managed-domain.xml"));
       DomainOps domainOps = new DomainOps(connect);
-      // Act
       List<String> paths = domainOps.getDiskPaths("toLookup");
-      // Assert
       assertThat(paths).containsExactly("/var/lib/libvirt/images/test-vm.qcow2");
       verify(domain).free();
     }
 
     @Test
     void getDiskPaths_domainWithoutDisks_returnsEmptyList() throws Exception {
-      // Arrange
       when(connect.domainLookupByName("toLookup")).thenReturn(domain);
       when(domain.getXMLDesc(anyInt())).thenReturn(loadXml("managed-domain-without-disk.xml"));
       DomainOps domainOps = new DomainOps(connect);
-      // Act
       List<String> paths = domainOps.getDiskPaths("toLookup");
-      // Assert
       assertThat(paths).isEmpty();
       verify(domain).free();
     }
 
     @Test
     void getDiskPaths_getXmlDescFails_rethrowsAndStillFreesHandle() throws LibvirtException {
-      // Arrange
       when(connect.domainLookupByName("toLookup")).thenReturn(domain);
       LibvirtException boom = mock(LibvirtException.class);
       DomainOps domainOps = new DomainOps(connect);
       doThrow(boom).when(domain).getXMLDesc(anyInt());
-      // Act
       assertThatThrownBy(() -> domainOps.getDiskPaths("toLookup")).isSameAs(boom);
-      // Assert
       verify(domain).free();
     }
   }

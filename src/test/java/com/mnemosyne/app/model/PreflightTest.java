@@ -32,25 +32,18 @@ public class PreflightTest {
 
   @Test
   void ok_isTrueUntilSomethingIsAdded() {
-    // Arrange
     Preflight preflight = new Preflight();
-    // Assert
     assertThat(preflight.ok()).isTrue();
-    // Act
     preflight.add(new Problem("pool 'fast'", "not found on the host"), "web-01");
-    // Assert
     assertThat(preflight.ok()).isFalse();
   }
 
   @Test
   void add_reportsAResourceOnceWithEveryServerThatNeedsIt() {
-    // Arrange
     Preflight preflight = new Preflight();
     Problem problem = new Problem("pool 'fast'", "not found on the host");
-    // Act
     preflight.add(problem, List.of("web-01", "web-02"));
     preflight.add(problem, "cache-01");
-    // Assert
     assertThat(preflight.getProblems()).hasSize(1);
     assertThat(preflight.getProblems().get(problem))
         .containsExactly("web-01", "web-02", "cache-01");
@@ -58,11 +51,9 @@ public class PreflightTest {
 
   @Test
   void blockers_nameEveryReasonForThatServerOnly() {
-    // Arrange
     Preflight preflight = new Preflight();
     preflight.add(new Problem("pool 'fast'", "not found on the host"), List.of("web-01", "web-02"));
     preflight.add(new Problem("network 'br0'", "not running"), "web-01");
-    // Act & Assert
     assertThat(preflight.blockers("web-01"))
         .containsExactly("pool 'fast' not found on the host", "network 'br0' not running");
     assertThat(preflight.blockers("web-02")).containsExactly("pool 'fast' not found on the host");
@@ -71,26 +62,20 @@ public class PreflightTest {
 
   @Test
   void checkTemplates_allFilesPresent_findsNothing(@TempDir Path dir) throws Exception {
-    // Arrange
     Templates templates = templatesIn(dir);
     for (String path : templates.paths()) Files.writeString(Path.of(path), "x");
-    // Act
     Preflight preflight = new Preflight();
     preflight.checkTemplates(server("web-01", templates));
-    // Assert
     assertThat(preflight.ok()).isTrue();
   }
 
   @Test
   void checkTemplates_missingFile_isReportedByPath(@TempDir Path dir) throws Exception {
-    // Arrange
     Templates templates = templatesIn(dir);
     for (String path : templates.paths()) Files.writeString(Path.of(path), "x");
     Files.delete(Path.of(templates.getUserDataTmpl()));
-    // Act
     Preflight preflight = new Preflight();
     preflight.checkTemplates(server("web-01", templates));
-    // Assert
     assertThat(preflight.getProblems())
         .containsExactly(
             entry(
@@ -102,10 +87,8 @@ public class PreflightTest {
 
   @Test
   void checkTemplates_noTemplatesAtAll_isReportedAgainstTheServer() {
-    // Act
     Preflight preflight = new Preflight();
     preflight.checkTemplates(server("web-01", null));
-    // Assert
     assertThat(preflight.getProblems())
         .containsExactly(entry(new Problem("templates", "not configured"), Set.of("web-01")));
   }

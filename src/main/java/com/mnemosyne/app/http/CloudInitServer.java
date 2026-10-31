@@ -29,11 +29,6 @@ public class CloudInitServer {
   private static final long POLL_INTERVAL_MS = 5000L;
   private static final long WAIT_TIMEOUT_MS = Duration.ofMinutes(5).toMillis();
 
-  /**
-   * Records, for one guest, that it phoned home — {@code <mnem:init state='finished'>} in its
-   * domain's metadata. The guest is answered only after it returns: a 200 tells cloud-init to stop
-   * trying, so a confirmation that was not written must be answered with an error it will retry.
-   */
   @FunctionalInterface
   public interface PhoneHome {
     void confirm() throws Exception;
@@ -74,18 +69,10 @@ public class CloudInitServer {
             return t;
           });
 
-  /**
-   * Whether this server's cloud-init reported back with {@code phone_home}.
-   *
-   * <p>Asked after the wait, by whoever has something to say about a single guest: a VM that never
-   * phoned home was booted and nothing more, and calling it initialized in the report is wrong in
-   * exactly the case the operator has to notice.
-   */
   public static boolean initialized(String name) {
     return done.contains(name);
   }
 
-  /** The seeds still unaccounted for once the wait is over; empty when every guest reported. */
   public static List<String> unfinished() {
     return seeds.keySet().stream().filter(n -> !done.contains(n)).sorted().toList();
   }
@@ -151,13 +138,10 @@ public class CloudInitServer {
     log.info("Cloud-Init Server has been stopped.");
   }
 
-  // HTTP request handler
-
   public static class CloudInitHandler implements HttpHandler {
 
     @Override
     public void handle(HttpExchange exchange) throws IOException {
-      // Expected path: /cloud-init/<serverName>/<token>/<filename>
       String[] parts = exchange.getRequestURI().getPath().split("/");
       if (parts.length < 5) {
         sendResponse(exchange, 404, "Invalid path");
@@ -174,7 +158,6 @@ public class CloudInitServer {
         sendResponse(exchange, 404, "VM Config not found");
         return;
       }
-      // Answered exactly like an unknown name, so a guess learns nothing about which names exist.
       if (!tokenMatches(registration.seed().token(), token)) {
         log.warn("Request for '{}' with a wrong token, refused", serverName);
         sendResponse(exchange, 404, "VM Config not found");
@@ -206,9 +189,6 @@ public class CloudInitServer {
       sendResponse(exchange, 200, content);
     }
 
-    /**
-     * Constant-time, so the time a refusal takes says nothing about how much of a guess was right.
-     */
     private static boolean tokenMatches(String expected, String given) {
       return MessageDigest.isEqual(
           expected.getBytes(StandardCharsets.UTF_8), given.getBytes(StandardCharsets.UTF_8));
@@ -230,8 +210,6 @@ public class CloudInitServer {
         sendResponse(exchange, 405, "phone_home must be POSTed");
         return;
       }
-      // The form body (instance_id, hostname, fqdn) must be read before responding: an
-      // unread request body breaks the connection, and cloud-init will count the attempt as failed.
       String body = new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
       log.trace("phone_home body from '{}': {}", serverName, body);
 

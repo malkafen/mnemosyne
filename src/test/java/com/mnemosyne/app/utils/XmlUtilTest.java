@@ -36,9 +36,7 @@ public class XmlUtilTest {
 
   @Test
   void diskPaths_skipsCdromAndSourcelessDisks_keepsOrder() {
-    // Act
     List<String> paths = XmlUtil.diskPaths(MIXED_DEVICES);
-    // Assert
     assertThat(paths)
         .containsExactly(
             "/var/lib/libvirt/images/system.qcow2", "/var/lib/libvirt/images/data.qcow2");
@@ -73,9 +71,7 @@ public class XmlUtilTest {
 
   @Test
   void getShortState_readsTargetAndSerialOfEveryFileBackedDisk() {
-    // Act
     DomainState state = XmlUtil.getShortState(DISKS_WITH_SERIALS);
-    // Assert
     assertThat(state.disks())
         .containsExactly(
             new DomainState.Disk("vda", "/var/lib/libvirt/images/web-01.qcow2", null),
@@ -84,33 +80,23 @@ public class XmlUtilTest {
 
   @Test
   void disks_serialIsReadFromTheDiskNotFromTheConsoleDevice() {
-    // A document-wide lookup for <serial> would find <serial type="pty">, the console, and
-    // attribute its (empty) text to the root disk.
-    // Act
     DomainState state = XmlUtil.getShortState(DISKS_WITH_SERIALS);
-    // Assert
     assertThat(state.disks().get(0).serial()).isNull();
   }
 
   @Test
   void diskVolName_isTheFileNameThatTheInventoryCanPredict() {
-    // This is what the plan matches an extra disk on.
-    // Act & Assert
     assertThat(XmlUtil.getShortState(DISKS_WITH_SERIALS).disks().get(1).volName())
         .isEqualTo("web-01-data.qcow2");
   }
 
   @Test
   void usedDiskTargets_countsTheCdromToo() {
-    // The cdrom is not a disk Mnemosyne owns, but it owns a target name all the same, and giving
-    // that name to a data disk would collide.
-    // Act & Assert
     assertThat(XmlUtil.usedDiskTargets(DISKS_WITH_SERIALS)).containsExactly("vda", "vdb", "hdc");
   }
 
   @Test
   void poolTargetPath_readsADirectoryBackedPool() {
-    // Arrange
     String pool =
         """
         <pool type="dir">
@@ -118,17 +104,14 @@ public class XmlUtilTest {
           <target><path>/var/lib/libvirt/images</path></target>
         </pool>
         """;
-    // Act & Assert
     assertThat(XmlUtil.poolTargetPath(pool)).isEqualTo("/var/lib/libvirt/images");
   }
 
   @Test
   void poolTargetPath_poolWithoutADirectory_isNull() {
-    // Act & Assert
     assertThat(XmlUtil.poolTargetPath("<pool type=\"rbd\"><name>ceph</name></pool>")).isNull();
   }
 
-  /** How libvirt actually renders a persistent config: KiB, with the balloon tag present. */
   private static final String DOMAIN_2_GIB =
       """
       <domain type="kvm">
@@ -142,47 +125,34 @@ public class XmlUtilTest {
 
   @Test
   void withMemory_writesKibValueAndRewritesUnit() {
-    // Act
     String patched = XmlUtil.withMemory(DOMAIN_2_GIB, 4096);
-    // Assert
     assertThat(patched).contains("<memory unit=\"KiB\">4194304</memory>");
   }
 
   @Test
   void withMemory_patchesCurrentMemoryToo() {
-    // The boot size would apply but the balloon would hold the domain at the old size.
-    // Act
     String patched = XmlUtil.withMemory(DOMAIN_2_GIB, 4096);
-    // Assert
     assertThat(patched).contains("<currentMemory unit=\"KiB\">4194304</currentMemory>");
   }
 
   @Test
   void withMemory_roundTripsThroughGetShortState() {
-    // Guards the unit convention end to end: what we write must read back unchanged.
-    // Act
     DomainState state = XmlUtil.getShortState(XmlUtil.withMemory(DOMAIN_2_GIB, 4096));
-    // Assert
     assertThat(state.ram()).isEqualTo(4096);
     assertThat(state.cpu()).isEqualTo(2);
   }
 
   @Test
   void withMemory_currentMemoryAbsent_stillPatchesMemory() {
-    // Arrange
     String noBalloon = DOMAIN_2_GIB.replaceAll("(?m)^.*currentMemory.*\\R", "");
-    // Act
     String patched = XmlUtil.withMemory(noBalloon, 8192);
-    // Assert
     assertThat(XmlUtil.getShortState(patched).ram()).isEqualTo(8192);
     assertThat(patched).doesNotContain("currentMemory");
   }
 
   @Test
   void withMemory_memoryAbsent_throws() {
-    // Arrange
     String noMemory = DOMAIN_2_GIB.replaceAll("(?m)^.*<memory.*\\R", "");
-    // Act & Assert
     assertThatThrownBy(() -> XmlUtil.withMemory(noMemory, 4096))
         .isInstanceOf(XmlParseException.class)
         .hasMessageContaining("<memory>");
@@ -190,12 +160,8 @@ public class XmlUtilTest {
 
   @Test
   void withMemory_staleMibUnit_isRewrittenToKib() {
-    // A hand-edited domain left on MiB must not survive the patch as MiB.
-    // Arrange
     String stale = DOMAIN_2_GIB.replace("unit=\"KiB\">2097152", "unit=\"MiB\">2048");
-    // Act
     String patched = XmlUtil.withMemory(stale, 4096);
-    // Assert
     assertThat(patched).doesNotContain("MiB");
     assertThat(XmlUtil.getShortState(patched).ram()).isEqualTo(4096);
   }
@@ -238,8 +204,6 @@ public class XmlUtilTest {
 
   @Test
   void getShortState_readsMnemReusedDisks_andNeverTakesAReusedVolumeForOwned() {
-    // A path on both lists can only come from a hand edit; keeping the volume is the mistake that
-    // can be undone, so reused wins.
     String xml =
         """
         <domain type='kvm'>

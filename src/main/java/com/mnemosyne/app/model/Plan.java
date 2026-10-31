@@ -19,33 +19,10 @@ import lombok.Getter;
 @Getter
 public final class Plan {
 
-  /**
-   * One extra disk the inventory asks for that the domain does not have yet.
-   *
-   * <p>{@code target} is what the plan predicts the disk will be called in the guest. It is
-   * computed from the persistent config, so the reconciler recomputes it against the live domain
-   * before attaching — a disk hot-plugged since the last boot occupies a name the stored config
-   * does not know about.
-   */
   public record DiskAttach(ExtraDisk disk, String target) {}
 
-  /**
-   * One disk the inventory wants bigger than it is on the host.
-   *
-   * <p>Carries both addresses the reconciler might need, because which one it uses depends on the
-   * domain's power state: {@code target} for a running domain, whose disk QEMU resizes in place,
-   * and {@code path} for a shut-down one, whose volume is resized through the storage pool.
-   */
   public record DiskGrow(String label, String target, String path, long fromGiB, long toGiB) {}
 
-  /**
-   * One disk the inventory wants smaller than it is on the host.
-   *
-   * <p>Never acted on, and not a note either: shrinking a disk throws away whatever lives past the
-   * new end, and no amount of care makes that recoverable. It stops the run instead, so the
-   * operator fixes the inventory rather than discovering later that the two disagree. Carried here
-   * rather than reported on the spot so that {@link Plan} stays a pure function.
-   */
   public record DiskShrink(String label, long actualGiB, long wantedGiB) {}
 
   public record Update(
@@ -72,32 +49,34 @@ public final class Plan {
       return server.isLaunch() != actual.active();
     }
 
-    /** An unset {@code autostart} is not desired state, so it never counts as drift. */
     public boolean autostartChanged() {
       return server.getAutostart() != null && server.getAutostart() != actual.autostart();
     }
 
-    /** Whether there is a disk to add. A disk is never removed. */
+    public boolean networkChanged() {
+      return actual.interfaceNetwork() != null
+          && !actual.interfaceNetwork().equals(server.getNetwork());
+    }
+
+    public boolean addressChanged() {
+      return actual.guestNetwork() != null && actual.guestNetwork().differsFrom(server);
+    }
+
     public boolean disksChanged() {
       return !toAttach.isEmpty();
     }
 
-    /** Whether a disk the domain already has must get bigger. */
     public boolean growChanged() {
       return !toGrow.isEmpty();
     }
 
-    /**
-     * Whether this entry is worth applying, as opposed to only worth mentioning.
-     *
-     * <p>A shrink is deliberately absent: it is the one piece of drift that is never applied, and
-     * counting it here would put the server on the list of things to do.
-     */
     boolean actionable() {
       return cpuChanged()
           || ramChanged()
           || autostartChanged()
           || powerChanged()
+          || networkChanged()
+          || addressChanged()
           || disksChanged()
           || growChanged();
     }
@@ -106,6 +85,18 @@ public final class Plan {
       StringBuilder sb = new StringBuilder();
       if (cpuChanged()) sb.append(String.format(", cpu %d->%d", actual.cpu(), server.getCpu()));
       if (ramChanged()) sb.append(String.format(", ram %d->%d", actual.ram(), server.getRam()));
+      if (networkChanged())
+        sb.append(
+            String.format(", network %s->%s", actual.interfaceNetwork(), server.getNetwork()));
+      if (addressChanged()) {
+        GuestNetwork was = actual.guestNetwork();
+        if (!Objects.equals(was.ip(), server.getIp()))
+          sb.append(String.format(", ip %s->%s", was.ip(), server.getIp()));
+        if (!Objects.equals(was.gateway(), server.getGateway()))
+          sb.append(
+              String.format(
+                  ", gateway %s->%s", orNone(was.gateway()), orNone(server.getGateway())));
+      }
       if (autostartChanged())
         sb.append(String.format(", autostart %b->%b", actual.autostart(), server.getAutostart()));
       if (powerChanged())
@@ -120,83 +111,33 @@ public final class Plan {
       return sb.length() == 0 ? "" : sb.substring(2);
     }
 
+    private static String orNone(String value) {
+      return value == null ? "none" : value;
+    }
+
     private static String power(boolean on) {
       return on ? "on" : "off";
     }
   }
 
-  /**
-   * Servers from config whose name matches an existing unmanaged domain, keyed by server id;
-   * adopting takes over that domain.
-   */
   private final Map<String, Server> toAdopt;
 
-  /**
-   * Managed domains whose live vCPU count, RAM, power, autostart or disk set differs from config.
-   */
   private final Map<String, Update> toUpdate;
 
-  /**
-   * Servers from config with no matching domain (managed or adoptable), keyed by server id; to be
-   * created.
-   */
   private final Map<String, Server> toCreate;
 
-  /** Managed domains absent from config, keyed by VM name, mapped to the volumes to delete. */
   private final Map<String, List<String>> toDelete;
 
-  /**
-   * Volumes of the domains in {@link #toDelete} that stay in their pool, keyed by VM name, as the
-   * lines the plan prints for them.
-   *
-   * <p>A volume goes with the VM only when its metadata records it as created by Mnemosyne — or the
-   * run says {@code --purge-disks} — and no other domain uses it. A recorded volume that was
-   * detached by hand is listed too, and never deleted.
-   */
   private final Map<String, List<String>> kept;
 
-  /** Names of all unmanaged domains, including adoptable ones. */
   private final List<String> unmanaged;
 
-  /**
-   * Things seen on the host that Mnemosyne will not act on, keyed by server id.
-   *
-   * <p>This is where every disk decision that is not "add" ends up. A disk the inventory does not
-   * mention is never detached and its volume is never deleted — a data disk holds the only copy of
-   * whatever is on it, and a wrong guess cannot be undone — so it is reported instead. Silence here
-   * would be the dangerous option: the operator would first learn about such a disk from the list
-   * of volumes a {@code delete} is about to remove.
-   *
-   * <p>Derived from the {@link Update} entries rather than collected alongside them, so the two
-   * cannot end up telling different stories about the same server.
-   */
   private final Map<String, List<String>> notes;
 
-  /**
-   * Managed domains of the inventory whose initialization never finished ({@code <mnem:init
-   * state='pending'>}), keyed by server id.
-   *
-   * <p>Their XML may match the inventory to the last byte and they are still not what it describes:
-   * cloud-init never confirmed it had configured them. They are shown and left alone — nothing is
-   * updated on a VM that was never set up — and they make the run incomplete. What to do with one
-   * is the operator's call until Mnemosyne can replace it.
-   */
   private final Map<String, DomainState> pendingInit;
 
-  /**
-   * Managed domains of the inventory with no {@code <mnem:init>} or a state Mnemosyne does not
-   * know, keyed by server id, mapped to the reason. Turned into preflight problems by the caller:
-   * Mnemosyne does not guess whether such a VM was ever initialized.
-   */
   private final Map<String, String> unknownInit;
 
-  /**
-   * Disks the inventory wants smaller than they are, keyed by server id.
-   *
-   * <p>Separate from {@link #notes} because it is not a note: the caller turns these into preflight
-   * problems, which stop the run. Separate from {@link #toUpdate} because there is nothing to apply
-   * — a server whose only drift is a shrink has no work to do and must not appear as if it had.
-   */
   private final Map<String, List<DiskShrink>> shrinks;
 
   public Plan(List<DomainState> actual, Map<String, Server> servers, boolean deleteDisable) {
@@ -224,9 +165,6 @@ public final class Plan {
             .collect(
                 Collectors.toMap(e -> e.getKey(), e -> e.getValue(), (a, b) -> a, TreeMap::new));
 
-    // Every managed domain the inventory knows, diffed once. Both maps below are derived from
-    // this list rather than filled in as it is built: update() stays a pure function, so nothing
-    // here depends on the pipeline running sequentially, in order, or exactly once per element.
     List<DomainState> inInventory =
         managedD.values().stream().filter(d -> servers.containsKey(d.serverId())).toList();
 
@@ -242,15 +180,12 @@ public final class Plan {
                 Collectors.toMap(
                     DomainState::serverId, Plan::unknownInitReason, (a, b) -> a, TreeMap::new));
 
-    // A pending VM is not diffed at all: nothing on it is updated, so there is nothing to show.
     List<Update> matched =
         inInventory.stream()
             .filter(d -> !pendingInit.containsKey(d.serverId()))
             .map(d -> update(servers.get(d.serverId()), d))
             .toList();
 
-    // Notes are kept for every matched domain, including the ones with no work to do, which is
-    // why they are collected before `actionable` filters anything out.
     this.notes =
         matched.stream()
             .filter(u -> !u.notes().isEmpty())
@@ -323,17 +258,6 @@ public final class Plan {
     this.unmanaged = unmanagedD.values().stream().map(d -> d.name()).sorted().toList();
   }
 
-  /**
-   * Compares one managed domain's disks with the inventory.
-   *
-   * <p>Costs nothing beyond the state snapshot the plan is built from. A disk is "already there"
-   * when the domain has it — not when a volume of that name exists in the pool, which is a
-   * different question and belongs to preflight.
-   *
-   * <p>Pure, and it has to stay that way: the constructor maps it over every managed domain, and a
-   * plan that recorded anything on the side would start losing it the day that stream runs in
-   * parallel. Everything this finds travels back in the returned {@link Update}.
-   */
   private static Update update(Server s, DomainState d) {
     List<String> notes = new ArrayList<>();
     List<DiskAttach> toAttach = diskAttachments(s, d, notes);
@@ -341,21 +265,14 @@ public final class Plan {
     List<DiskShrink> shrinks = new ArrayList<>();
     sizeDrift(s, d, toGrow, shrinks);
     notes.addAll(unknownDiskNotes(s, d));
+    if (d.guestNetwork() == null) notes.add(UNRECORDED_NETWORK_NOTE);
     return new Update(
         s, d, toAttach, List.copyOf(toGrow), List.copyOf(shrinks), List.copyOf(notes));
   }
 
-  /**
-   * Compares the size of every disk the domain already has with the size the inventory asks for.
-   *
-   * <p>Only disks that are attached are looked at. One the inventory lists and the domain does not
-   * have is an attach, and it is created at the right size to begin with, so there is nothing here
-   * to compare it against.
-   *
-   * <p>The root disk is matched by position and the extra disks by serial, each the way the rest of
-   * the code already identifies them, so a renamed VM is measured against the disks it actually
-   * has.
-   */
+  static final String UNRECORDED_NETWORK_NOTE =
+      "ip and gateway were never recorded on this domain - not reconciled";
+
   private static void sizeDrift(
       Server s, DomainState d, List<DiskGrow> grow, List<DiskShrink> shrink) {
 
@@ -366,13 +283,6 @@ public final class Plan {
               disk -> compareSize("disk '" + e.getName() + "'", disk, e.getSize(), grow, shrink));
   }
 
-  /**
-   * One disk's size against one inventory figure.
-   *
-   * <p>A disk whose capacity could not be read is left alone entirely. Treating an unknown size as
-   * zero would make every such disk look undersized, and the run would "grow" disks whose real size
-   * nobody knows.
-   */
   private static void compareSize(
       String label,
       DomainState.Disk disk,
@@ -426,7 +336,6 @@ public final class Plan {
     return (disk.owned() || purgeDisks) && sharedWith(d, disk, actual).isEmpty();
   }
 
-  /** Another domain the volume is attached to, which deleting it would pull the disk from under. */
   private static Optional<String> sharedWith(
       DomainState d, DomainState.Disk disk, List<DomainState> actual) {
     return actual.stream()
@@ -446,13 +355,6 @@ public final class Plan {
                 + ", left as is (--purge-disks deletes it)");
   }
 
-  /**
-   * Disks attached to the domain that the inventory does not describe.
-   *
-   * <p>The first file-backed disk is skipped unconditionally: it is the boot disk, and on a domain
-   * adopted with {@code --join} its volume can be named anything at all. Everything after it that
-   * the inventory does not claim is somebody else's — reported, never touched.
-   */
   private static List<String> unknownDiskNotes(Server s, DomainState d) {
     if (d.disks().size() <= 1) return List.of();
 
@@ -473,16 +375,6 @@ public final class Plan {
         .toList();
   }
 
-  /**
-   * The preflight result is printed with the plan rather than after it: a VM whose pool, image,
-   * network or template is missing is listed as {@code blocked} instead of {@code create}, so the
-   * plan shows what would actually happen and why it would not.
-   *
-   * <p>An entry preflight refused is printed as {@code blocked} wherever it would otherwise have
-   * appeared — a creation, an update or a bare note — because the run will not carry it out, and a
-   * plan that still showed it as {@code update} would be describing something that is not going to
-   * happen.
-   */
   public void print(String group, boolean isJoin, Preflight preflight) {
     Report report = new Report();
 
@@ -521,9 +413,6 @@ public final class Plan {
                 "init pending"
                     + (d.init().created() == null ? "" : " since " + d.init().created())
                     + ": cloud-init never confirmed it finished - left as is"));
-    // An inventory server whose name an unmanaged domain already holds is neither created nor
-    // updated, and a plan that said nothing about it would read as "no changes" while the
-    // domain on the host is somebody else's.
     toAdopt.forEach(
         (id, s) ->
             report.add(
@@ -540,8 +429,6 @@ public final class Plan {
           report.sub(createDiskLines(s));
         });
 
-    // Servers with something to report but nothing to do. They are not a change, so they are
-    // counted separately: an operator reading "update: 0, note: 1" knows nothing will be touched.
     notes.forEach(
         (id, lines) -> {
           if (toUpdate.containsKey(id)) return;
@@ -550,9 +437,6 @@ public final class Plan {
           report.sub(lines);
         });
 
-    // A server whose only finding is a disk that must not shrink has neither work nor a note, and
-    // would otherwise vanish from the plan that is about to stop because of it.
-    // The same goes for a domain whose init state cannot be told and that has no drift either.
     Stream.concat(shrinks.keySet().stream(), unknownInit.keySet().stream())
         .distinct()
         .forEach(
@@ -564,7 +448,6 @@ public final class Plan {
     report.print(group, "no changes");
   }
 
-  /** Prints an entry as blocked when preflight refused it, and reports whether it did. */
   private static boolean blocked(Report report, Preflight preflight, String id) {
     List<String> blockers = preflight.blockers(id);
     if (blockers.isEmpty()) return false;
@@ -572,7 +455,6 @@ public final class Plan {
     return true;
   }
 
-  /** The disks a new VM is getting, listed under its entry the way deleted volumes are. */
   private static List<String> createDiskLines(Server s) {
     Map<String, String> lines = new LinkedHashMap<>();
     s.getExtraDisks()

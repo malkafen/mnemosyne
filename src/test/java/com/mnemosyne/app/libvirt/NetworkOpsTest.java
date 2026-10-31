@@ -23,34 +23,25 @@ public class NetworkOpsTest {
 
   @Test
   void checkNetwork_unknownName_isReported() throws LibvirtException {
-    // Arrange
     when(connect.networkLookupByName("br-lan")).thenThrow(mock(LibvirtException.class));
-    // Act
     Optional<Problem> problem = new NetworkOps(connect).checkNetwork("br-lan");
-    // Assert
     assertThat(problem).contains(new Problem("network 'br-lan'", "not found on the host"));
   }
 
   @Test
   void checkNetwork_definedButStopped_isReportedAndHandleFreed() throws LibvirtException {
-    // Arrange
     when(connect.networkLookupByName("br-lan")).thenReturn(network);
     when(network.isActive()).thenReturn(0);
-    // Act
     Optional<Problem> problem = new NetworkOps(connect).checkNetwork("br-lan");
-    // Assert
     assertThat(problem).map(Problem::reason).get().asString().contains("not running");
     verify(network).free();
   }
 
   @Test
   void checkNetwork_runningNetwork_passesAndFreesHandle() throws LibvirtException {
-    // Arrange
     when(connect.networkLookupByName("default")).thenReturn(network);
     when(network.isActive()).thenReturn(1);
-    // Act
     Optional<Problem> problem = new NetworkOps(connect).checkNetwork("default");
-    // Assert
     assertThat(problem).isEmpty();
     verify(network).free();
   }

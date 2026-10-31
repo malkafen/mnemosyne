@@ -66,6 +66,7 @@ Everything Mnemosyne knows about a domain it keeps in the domain's own XML, unde
     <mnem:disks>…</mnem:disks>                <!-- volumes Mnemosyne created: deleted with the VM -->
     <mnem:reused-disks>…</mnem:reused-disks>  <!-- volumes found in the pool: kept -->
     <mnem:init state="finished" token="…" created="…" finished="…"/>
+    <mnem:network ip="192.0.2.40/24" gateway="192.0.2.1"/>   <!-- the guest's address -->
   </mnem:mnemosyne>
 </metadata>
 ```
@@ -105,7 +106,7 @@ flowchart TD
    connection instead of prompting. `--no-verify` adds `no_verify=1` and turns
    the check off.
 3. **Snapshot.** Every domain on the host is read: name, vCPU, RAM, power state, autostart,
-   metadata, disks and their capacities.
+   metadata, disks and their capacities, and the libvirt network of the first interface.
 4. **Plan** — see [below](#the-plan).
 5. **Preflight** — see [below](#preflight). With `--plan` the run stops here.
 6. **Confirm.** The cloud-init server starts on port 8080 under `/cloud-init`, then a 10-second
@@ -123,7 +124,7 @@ flowchart TD
 | Entry | When | What happens |
 | --- | --- | --- |
 | `+` create | In the inventory, no managed domain with that `serverId`, no unmanaged domain with that name | Created |
-| `~` update | Managed, and vCPU, RAM, power state or autostart differ, an extra disk is missing, or a disk is smaller than asked | Changed in place |
+| `~` update | Managed, and vCPU, RAM, power state, autostart, the libvirt network or the recorded address differ, an extra disk is missing, or a disk is smaller than asked | Changed in place |
 | `-` delete | Managed, no longer in the inventory | Destroyed with its volumes; suppressed by `--no-delete` |
 | `!` pending | Managed, in the inventory, `<mnem:init state="pending">` | Shown, never updated; the run exits `1` |
 | `!` blocked | A prerequisite is missing, a disk would shrink, a volume is attached elsewhere, or the init marker is missing/unknown | Nothing is applied in **any** group |
@@ -140,8 +141,9 @@ printed, so a plan that cannot work is never started:
 - every storage pool exists and is running;
 - the pool of a VM being created holds the base image `volLookup` (looked up in libvirt's cache
   first, and the pool refreshed only if it is missing, so a freshly copied image is found);
-- the libvirt `network` exists and is running;
-- the template files are readable on the machine running Mnemosyne;
+- the libvirt `network` exists and is running, for a new VM and for one moved to another network;
+- the template files are readable on the machine running Mnemosyne, for a new VM and for one whose
+  address changes;
 - no volume Mnemosyne is about to write to is already attached to a different domain.
 
 Each pool, image and network is looked up once per distinct value, and a group with nothing to
@@ -160,7 +162,7 @@ flowchart TB
     end
     subgraph upd["update"]
         direction LR
-        u1["attach missing extra disks<br/>grow small disks"] --> u2["vCPU, RAM<br/>(next boot)"] --> u3["autostart"] --> u4["power: start / shutdown<br/>(destroy after 60 s)"]
+        u1["attach missing extra disks<br/>grow small disks"] --> u2["vCPU, RAM<br/>(next boot)"] --> u3["autostart"] --> u5["move the interface<br/>to the new network"] --> u4["power: start / shutdown<br/>(destroy after 60 s)"] --> u6["new address into the guest<br/>(qemu-guest-agent, netplan)"]
     end
     subgraph cre["create"]
         direction LR
@@ -176,7 +178,8 @@ flowchart TB
   volumes it created itself.
 - **update** changes vCPU through libvirt and RAM by redefining the persistent config; both take
   effect on the guest's next boot (`applies after restart`). Disk changes are described in
-  [disks](disks.md).
+  [disks](disks.md), network changes in
+  [configuration](configuration.md#changing-the-network-of-an-existing-vm).
 - Failures are per VM: the entry is reported as skipped and the run continues.
 
 **Parallelism.** VMs are applied one at a time unless `--parallel <n>`. Each of the three phases
@@ -203,6 +206,7 @@ src/main/java/com/mnemosyne/app/
   model/Server.java           one VM; XML and cloud-init rendering, validation constraints
   model/ExtraDisk.java        one entry of extraDisks
   model/InitMarker.java       <mnem:init> state, token and timestamps
+  model/GuestNetwork.java     <mnem:network>: the address the guest was configured with
   model/Templates.java        template paths, group defaults merged with per-server overrides
   model/Plan.java             create/update/delete/adopt/unmanaged diff
   model/Preflight.java        unmet prerequisites of the planned creations, per VM
@@ -212,6 +216,7 @@ src/main/java/com/mnemosyne/app/
   libvirt/DomainOps.java      define, boot, destroy, undefine, update, read metadata
   libvirt/StorageOps.java     clone, create, resize and delete volumes; pool and image checks
   libvirt/NetworkOps.java     libvirt network checks
+  libvirt/GuestOps.java       qemu-guest-agent: write and apply the guest's netplan
   http/CloudInitServer.java   NoCloud seed server and phone_home tracking
   output/Report.java          plan/preflight/applied console blocks
   utils/XmlUtil.java          domain XML parsing and metadata rewriting

@@ -19,14 +19,6 @@ import org.libvirt.StorageVolInfo;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
-/**
- * Growing a disk from one end of the run to the other: the snapshot is read, the sizes are attached
- * to it, the plan decides, and the reconciler picks the call that fits the domain's power state.
- *
- * <p>That last choice is the part worth this much setup. A running domain and a shut-down one need
- * two different libvirt calls, and picking the wrong one either fails outright or quietly leaves
- * the guest with a disk QEMU still believes is the old size.
- */
 @ExtendWith(MockitoExtension.class)
 @DisplayName("Harmonia, growing disks")
 public class HarmoniaGrowTest {
@@ -41,7 +33,6 @@ public class HarmoniaGrowTest {
   @Mock StorageVol rootVol;
   @Mock StorageVol dataVol;
 
-  /** A managed domain with a root disk, and optionally one extra disk carrying a serial. */
   private static String domainXml(boolean withData) {
     return """
         <domain type='kvm'>
@@ -103,7 +94,6 @@ public class HarmoniaGrowTest {
     return i;
   }
 
-  /** The host as libvirt would report it: one domain, in the given power state. */
   private void host(boolean running, boolean withData) throws LibvirtException {
     when(connect.listAllDomains(0)).thenReturn(new Domain[] {domain});
     when(domain.getXMLDesc(Domain.XMLFlags.INACTIVE)).thenReturn(domainXml(withData));
@@ -113,46 +103,34 @@ public class HarmoniaGrowTest {
 
   @Test
   void aRunningDomainIsResizedThroughQemu_soTheGuestSeesItAtOnce() throws LibvirtException {
-    // Arrange
     host(true, false);
     when(connect.storageVolLookupByPath(ROOT)).thenReturn(rootVol);
     when(rootVol.getInfo()).thenReturn(info(25));
     when(connect.domainLookupByName(NAME)).thenReturn(domain);
 
     Harmonia harmonia = new Harmonia("hv01", connect);
-    // Act
     Plan plan = harmonia.plan(Map.of(NAME, server(40, true)), false);
     harmonia.reconcile(1);
-    // Assert
     assertThat(plan.getToUpdate().get(NAME).diff()).contains("grow root disk 25G->40G");
     verify(domain).blockResize("vda", 40 * GIB, 1);
-    // The volume must not be resized behind QEMU's back while QEMU has the file open.
     verify(rootVol, never()).resize(anyLong(), anyInt());
   }
 
   @Test
   void aShutDownDomainIsResizedThroughItsVolume() throws LibvirtException {
-    // There is no QEMU process to ask, so the volume is grown in the pool instead and the guest
-    // finds the new size when it next boots.
-    // Arrange
     host(false, false);
     when(connect.storageVolLookupByPath(ROOT)).thenReturn(rootVol);
     when(rootVol.getInfo()).thenReturn(info(25));
 
     Harmonia harmonia = new Harmonia("hv01", connect);
-    // Act
     harmonia.plan(Map.of(NAME, server(40, false)), false);
     harmonia.reconcile(1);
-    // Assert
     verify(rootVol).resize(40 * GIB, 0);
     verify(domain, never()).blockResize(anyString(), anyLong(), anyInt());
   }
 
   @Test
   void anExtraDiskIsGrownByItsOwnTarget_notTheRootDisks() throws LibvirtException {
-    // Two disks on one domain, one of them drifting. Addressing the wrong target would grow the
-    // root disk instead — and there is no way back from that.
-    // Arrange
     host(true, true);
     when(connect.storageVolLookupByPath(ROOT)).thenReturn(rootVol);
     when(connect.storageVolLookupByPath(DATA)).thenReturn(dataVol);
@@ -161,26 +139,21 @@ public class HarmoniaGrowTest {
     when(connect.domainLookupByName(NAME)).thenReturn(domain);
 
     Harmonia harmonia = new Harmonia("hv01", connect);
-    // Act
     harmonia.plan(Map.of(NAME, server(25, true, extra("data", 20))), false);
     harmonia.reconcile(1);
-    // Assert
     verify(domain).blockResize("vdb", 20 * GIB, 1);
     verify(domain, never()).blockResize(eq("vda"), anyLong(), anyInt());
   }
 
   @Test
   void sizesThatAlreadyMatchCostNoResizeAtAll() throws LibvirtException {
-    // Arrange
     host(true, false);
     when(connect.storageVolLookupByPath(ROOT)).thenReturn(rootVol);
     when(rootVol.getInfo()).thenReturn(info(25));
 
     Harmonia harmonia = new Harmonia("hv01", connect);
-    // Act
     Plan plan = harmonia.plan(Map.of(NAME, server(25, true)), false);
     harmonia.reconcile(1);
-    // Assert
     assertThat(plan.getToUpdate()).isEmpty();
     verify(domain, never()).blockResize(anyString(), anyLong(), anyInt());
     verify(rootVol, never()).resize(anyLong(), anyInt());
@@ -188,16 +161,13 @@ public class HarmoniaGrowTest {
 
   @Test
   void aDiskBiggerThanTheInventoryBlocksTheRun_andIsNeverShrunk() throws LibvirtException {
-    // Arrange
     host(true, false);
     when(connect.storageVolLookupByPath(ROOT)).thenReturn(rootVol);
     when(rootVol.getInfo()).thenReturn(info(50));
 
     Harmonia harmonia = new Harmonia("hv01", connect);
-    // Act
     harmonia.plan(Map.of(NAME, server(40, true)), false);
     var preflight = harmonia.preflight();
-    // Assert
     assertThat(preflight.ok()).isFalse();
     assertThat(preflight.blockers(NAME))
         .singleElement()
@@ -208,16 +178,12 @@ public class HarmoniaGrowTest {
 
   @Test
   void aVolumeWhoseSizeCannotBeReadIsNeverResized() throws LibvirtException {
-    // The lookup fails, the capacity stays unknown, and an unknown size is not a reason to act.
-    // Arrange
     host(true, false);
     when(connect.storageVolLookupByPath(ROOT)).thenThrow(mock(LibvirtException.class));
 
     Harmonia harmonia = new Harmonia("hv01", connect);
-    // Act
     Plan plan = harmonia.plan(Map.of(NAME, server(40, true)), false);
     harmonia.reconcile(1);
-    // Assert
     assertThat(plan.getToUpdate()).isEmpty();
     assertThat(plan.getShrinks()).isEmpty();
     verify(domain, never()).blockResize(anyString(), anyLong(), anyInt());
@@ -225,9 +191,6 @@ public class HarmoniaGrowTest {
 
   @Test
   void anUnmanagedDomainIsNotEvenMeasured() throws LibvirtException {
-    // Its sizes are nobody's business, and a lookup per disk of every foreign domain on the host
-    // would be paid for on every run.
-    // Arrange
     when(connect.listAllDomains(0)).thenReturn(new Domain[] {domain});
     when(domain.getXMLDesc(Domain.XMLFlags.INACTIVE))
         .thenReturn(
@@ -237,9 +200,7 @@ public class HarmoniaGrowTest {
     when(domain.getAutostart()).thenReturn(false);
 
     Harmonia harmonia = new Harmonia("hv01", connect);
-    // Act
     harmonia.plan(Map.of(NAME, server(40, true)), false);
-    // Assert
     verify(connect, never()).storageVolLookupByPath(anyString());
   }
 }

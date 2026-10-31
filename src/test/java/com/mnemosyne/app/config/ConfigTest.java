@@ -9,7 +9,6 @@ import org.junit.jupiter.api.Test;
 import picocli.CommandLine;
 import picocli.CommandLine.ParameterException;
 
-/** Command line over MNEM_* over the default, with no option able to undo another. */
 @DisplayName("Settings from the command line and the environment")
 public class ConfigTest {
 
@@ -64,7 +63,6 @@ public class ConfigTest {
 
   @Test
   void anEmptyVariableCountsAsNotSet() {
-    // What a Helm template renders for a value left out.
     Config c = parse(Map.of("MNEM_PARALLEL", "", "MNEM_KEY", "  ", "MNEM_NO_VERIFY", ""));
     assertThat(c.getParallel()).isEqualTo(1);
     assertThat(c.getKey()).isNull();
@@ -73,8 +71,6 @@ public class ConfigTest {
 
   @Test
   void noVerifyOnTheCommandLineNeverTurnsTheCheckBackOn() {
-    // picocli flips a boolean's default by itself: with MNEM_NO_VERIFY=true the flag meant
-    // "verify".
     assertThat(parse(Map.of("MNEM_NO_VERIFY", "true"), "--no-verify").isSkipHostKeyCheck())
         .isTrue();
     assertThat(parse(Map.of("MNEM_NO_VERIFY", "false"), "--no-verify").isSkipHostKeyCheck())

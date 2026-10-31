@@ -84,7 +84,9 @@ Consequences worth knowing:
   run. The annotated reference is [`user-data.example.yml`](../templates/user-data.example.yml).
 - **`phone_home` is always injected** — do not add your own to the template, it is overwritten.
 - **The network interface must be called `vif0`** in the template: that is the key Mnemosyne
-  writes the address into. The shipped template matches `enp1*` and renames it to `vif0`
+  writes the address into. The same template, under a top-level `network:` key, becomes the
+  guest's netplan file when `ip` or `gateway` change later
+  ([changing the network](configuration.md#changing-the-network-of-an-existing-vm)). The shipped template matches `enp1*` and renames it to `vif0`
   ([`network-config.example.yml`](../templates/network-config.example.yml)).
 - The shipped `user-data` ends with `power_state: reboot`, which is why `server.xml` has
   `on_reboot=restart`. See the comments in [`server.xml`](../templates/server.xml).

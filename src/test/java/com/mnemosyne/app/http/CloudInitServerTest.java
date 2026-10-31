@@ -20,10 +20,6 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
-/**
- * The seed and phone_home are served to the guest that holds the token, and a phone_home is
- * answered 200 only once it has been recorded.
- */
 @DisplayName("CloudInitServer, token and phone_home")
 public class CloudInitServerTest {
 
@@ -59,27 +55,21 @@ public class CloudInitServerTest {
 
   @Test
   void theSeedIsServedWithTheRightToken() throws Exception {
-    // Arrange
     CloudInitServer.register(seed(), () -> {});
     HttpExchange exchange = request("GET", "/cloud-init/" + NAME + "/" + TOKEN + "/user-data");
-    // Act
     handle(exchange);
-    // Assert
     verify(exchange).sendResponseHeaders(eq(200), anyLong());
     assertThat(body.toString(StandardCharsets.UTF_8)).isEqualTo("user");
   }
 
   @Test
   void aWrongTokenIsAnsweredLikeAnUnknownName() throws Exception {
-    // Arrange
     CloudInitServer.register(seed(), () -> {});
     HttpExchange wrong =
         request("GET", "/cloud-init/" + NAME + "/" + "f".repeat(32) + "/user-data");
     HttpExchange unknown = request("GET", "/cloud-init/nobody/" + TOKEN + "/user-data");
-    // Act
     handle(wrong);
     handle(unknown);
-    // Assert
     verify(wrong).sendResponseHeaders(eq(404), anyLong());
     verify(unknown).sendResponseHeaders(eq(404), anyLong());
     assertThat(body.toString(StandardCharsets.UTF_8))
@@ -88,23 +78,17 @@ public class CloudInitServerTest {
 
   @Test
   void theOldPathWithoutAToken_isRefused() throws Exception {
-    // Arrange
     CloudInitServer.register(seed(), () -> {});
     HttpExchange exchange = request("GET", "/cloud-init/" + NAME + "/user-data");
-    // Act
     handle(exchange);
-    // Assert
     verify(exchange).sendResponseHeaders(eq(404), anyLong());
   }
 
   @Test
   void phoneHomeIsRecordedFirst_thenAnswered200() throws Exception {
-    // Arrange
     AtomicInteger confirmed = new AtomicInteger();
     CloudInitServer.register(seed(), confirmed::incrementAndGet);
-    // Act
     handle(request("POST", "/cloud-init/" + NAME + "/" + TOKEN + "/phone-home"));
-    // Assert
     assertThat(confirmed).hasValue(1);
     assertThat(CloudInitServer.initialized(NAME)).isTrue();
     assertThat(CloudInitServer.unfinished()).doesNotContain(NAME);
@@ -112,28 +96,22 @@ public class CloudInitServerTest {
 
   @Test
   void aPhoneHomeThatCannotBeRecorded_isAnswered500_soCloudInitRetries() throws Exception {
-    // Arrange
     CloudInitServer.register(
         seed(),
         () -> {
           throw new IllegalStateException("libvirt connection lost");
         });
     HttpExchange exchange = request("POST", "/cloud-init/" + NAME + "/" + TOKEN + "/phone-home");
-    // Act
     handle(exchange);
-    // Assert
     verify(exchange).sendResponseHeaders(eq(500), anyLong());
     assertThat(CloudInitServer.initialized(NAME)).isFalse();
   }
 
   @Test
   void aPhoneHomeWithAWrongToken_isNeverRecorded() throws Exception {
-    // Arrange
     AtomicInteger confirmed = new AtomicInteger();
     CloudInitServer.register(seed(), confirmed::incrementAndGet);
-    // Act
     handle(request("POST", "/cloud-init/" + NAME + "/" + "0".repeat(32) + "/phone-home"));
-    // Assert
     assertThat(confirmed).hasValue(0);
     assertThat(CloudInitServer.initialized(NAME)).isFalse();
   }

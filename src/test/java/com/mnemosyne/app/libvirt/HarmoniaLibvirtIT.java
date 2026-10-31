@@ -39,24 +39,6 @@ import org.libvirt.LibvirtException;
 import org.libvirt.StorageVol;
 import org.mockito.ArgumentCaptor;
 
-/**
- * The reconciler against real libvirt: libvirt-java, JNA and libvirt's own XML handling, with the
- * in-memory test driver standing in for the hypervisor. The unit tests mock {@link Connect}, so
- * they cannot tell whether libvirt accepts what Mnemosyne sends it or hands back what Mnemosyne
- * expects to read; this is where that is checked.
- *
- * <p>Each test opens its own {@code test:///} connection to {@code libvirt/test-node.xml}, which
- * gives it a private host in that file's state. A "run" is a new {@link Harmonia} on the same
- * connection, so a second run sees what the first one left behind, as it would on a real host.
- *
- * <p>What the driver cannot do decides what is not covered here: it has no volume resize, no block
- * resize and no attach to the persistent config, so growing a disk and adding one to an existing VM
- * stay with the unit tests. For the same reason a root disk is never cloned here but found in the
- * pool, except in the one test that is about the clone being taken back.
- *
- * <p>Needs the libvirt client library ({@code libvirt0}); no daemon, no KVM and no network. Run
- * with {@code mvn verify}.
- */
 @DisplayName("Harmonia against libvirt's test driver")
 public class HarmoniaLibvirtIT {
 
@@ -67,11 +49,6 @@ public class HarmoniaLibvirtIT {
   private final ByteArrayOutputStream out = new ByteArrayOutputStream();
   private PrintStream stdout;
 
-  /**
-   * Skips the class on a machine without the libvirt client library, instead of failing every test
-   * with the same link error. In CI (GitHub sets {@code CI=true}) a missing library is a broken job
-   * and still fails.
-   */
   @BeforeAll
   static void libvirtPresent() {
     try {
@@ -100,9 +77,6 @@ public class HarmoniaLibvirtIT {
     if (connect != null) connect.close();
   }
 
-  // Inventory
-
-  /** The shipped domain and volume templates, so libvirt is shown exactly what users run. */
   private static Templates templates() {
     Templates t = new Templates();
     t.setServerTmpl("templates/server.xml");
@@ -143,9 +117,6 @@ public class HarmoniaLibvirtIT {
     return m;
   }
 
-  // Runs
-
-  /** One run: plan, preflight, apply. Returns the Harmonia so the caller can read what it did. */
   private Harmonia apply(Map<String, Server> servers, int parallel) throws LibvirtException {
     Harmonia h = new Harmonia("it", connect);
     h.plan(servers, false);
@@ -155,14 +126,12 @@ public class HarmoniaLibvirtIT {
     return h;
   }
 
-  /** Creates the servers and has every one of them phone home, as a finished first run would. */
   private void createAndInitialize(Server... servers) throws Exception {
     Harmonia h = apply(inventory(servers), 1);
     assertThat(h.failures()).isZero();
     for (Server s : servers) assertThat(phoneHome(s.getName(), state(s.getName()))).isEqualTo(200);
   }
 
-  /** What cloud-init's phone_home does at the end of the guest's first boot. */
   private static int phoneHome(String name, DomainState state) throws Exception {
     HttpExchange exchange = mock(HttpExchange.class);
     when(exchange.getRequestURI())
@@ -177,8 +146,6 @@ public class HarmoniaLibvirtIT {
     verify(exchange).sendResponseHeaders(status.capture(), anyLong());
     return status.getValue();
   }
-
-  // The host, as libvirt reports it
 
   private DomainState state(String name) throws LibvirtException {
     Domain d = connect.domainLookupByName(name);
@@ -200,18 +167,13 @@ public class HarmoniaLibvirtIT {
     }
   }
 
-  // Tests
-
   @Test
   void aNewVm_isDefinedFromTheShippedTemplate_runningPendingAndWithItsDisksRecorded()
       throws Exception {
-    // Arrange
     Server web = server("web-01");
     web.setAutostart(true);
     web.setExtraDisks(List.of(extraDisk("data", 5)));
-    // Act
     Harmonia h = apply(inventory(web), 1);
-    // Assert
     assertThat(h.failures()).isZero();
     DomainState s = state("web-01");
     assertThat(s.managed()).isTrue();
@@ -221,7 +183,6 @@ public class HarmoniaLibvirtIT {
     assertThat(s.active()).isTrue();
     assertThat(s.autostart()).isTrue();
     assertThat(s.init().isPending()).isTrue();
-    // The root disk was found in the pool, so it is not Mnemosyne's; the data disk was created.
     assertThat(s.diskPaths())
         .containsExactly(IMAGES + "web-01.qcow2", IMAGES + "web-01-data.qcow2");
     assertThat(s.reusedPaths()).containsExactly(IMAGES + "web-01.qcow2");
@@ -231,9 +192,7 @@ public class HarmoniaLibvirtIT {
 
   @Test
   void severalVmsAppliedInParallel_allEndUpOnTheHost() throws Exception {
-    // Act
     Harmonia h = apply(inventory(server("web-01"), server("web-02")), 2);
-    // Assert
     assertThat(h.failures()).isZero();
     assertThat(state("web-01").active()).isTrue();
     assertThat(state("web-02").active()).isTrue();
@@ -241,12 +200,9 @@ public class HarmoniaLibvirtIT {
 
   @Test
   void aPhoneHome_isWrittenToLibvirt_andTheNextRunHasNothingToDo() throws Exception {
-    // Arrange
     Server web = server("web-01");
     web.setExtraDisks(List.of(extraDisk("data", 5)));
-    // Act
     createAndInitialize(web);
-    // Assert: the marker libvirt now stores, and a plan built from it
     InitMarker init = state("web-01").init();
     assertThat(init.isFinished()).isTrue();
     assertThat(init.finished()).isNotNull();
@@ -263,24 +219,18 @@ public class HarmoniaLibvirtIT {
 
   @Test
   void aVmThatNeverPhonedHome_isPendingOnTheNextRun() throws Exception {
-    // Arrange
     Server web = server("web-01");
     apply(inventory(web), 1);
-    // Act
     Harmonia next = new Harmonia("it", connect);
     next.plan(inventory(web), false);
-    // Assert
     assertThat(next.pendingInit()).containsExactly("web-01");
   }
 
   @Test
   void launchFalse_bootsTheVmForCloudInit_andSettleShutsItDown() throws Exception {
-    // Arrange
     Server web = server("web-01");
     web.setLaunch(false);
-    // Act
     Harmonia h = apply(inventory(web), 1);
-    // Assert
     assertThat(h.failures()).isZero();
     assertThat(state("web-01").active()).isFalse();
     assertThat(out.toString(StandardCharsets.UTF_8)).contains("cloud-init did not finish");
@@ -288,23 +238,19 @@ public class HarmoniaLibvirtIT {
 
   @Test
   void anUpdate_changesCpuRamAutostartAndPower_inThePersistentConfig() throws Exception {
-    // Arrange
     createAndInitialize(server("web-01"));
     Server wanted = server("web-01");
     wanted.setCpu(4);
     wanted.setRam(2048);
     wanted.setAutostart(true);
     wanted.setLaunch(false);
-    // Act
     Harmonia h = apply(inventory(wanted), 1);
-    // Assert
     assertThat(h.failures()).isZero();
     DomainState s = state("web-01");
     assertThat(s.cpu()).isEqualTo(4);
     assertThat(s.ram()).isEqualTo(2048);
     assertThat(s.autostart()).isTrue();
     assertThat(s.active()).isFalse();
-    // The RAM change redefines the domain; the record of what it owns must survive that.
     assertThat(s.init().isFinished()).isTrue();
     assertThat(s.reusedPaths()).containsExactly(IMAGES + "web-01.qcow2");
   }
@@ -312,13 +258,10 @@ public class HarmoniaLibvirtIT {
   @Test
   void aVmDroppedFromTheInventory_isDeleted_withTheVolumesItCreatedButNotTheOnesItFound()
       throws Exception {
-    // Arrange
     Server web = server("web-01");
     web.setExtraDisks(List.of(extraDisk("data", 5)));
     createAndInitialize(web, server("web-02"));
-    // Act
     Harmonia h = apply(inventory(server("web-02")), 1);
-    // Assert
     assertThat(h.failures()).isZero();
     assertThatThrownBy(() -> connect.domainLookupByName("web-01"))
         .isInstanceOf(LibvirtException.class);
@@ -329,20 +272,16 @@ public class HarmoniaLibvirtIT {
 
   @Test
   void deleteDisable_leavesAVmDroppedFromTheInventoryAlone() throws Exception {
-    // Arrange
     createAndInitialize(server("web-01"));
-    // Act
     Harmonia h = new Harmonia("it", connect);
     Plan plan = h.plan(Map.of(), true);
     h.reconcile(1);
-    // Assert
     assertThat(plan.getToDelete()).isEmpty();
     assertThat(state("web-01").active()).isTrue();
   }
 
   @Test
   void anUnmanagedDomain_isNeverTouched_andJoinAdoptsIt() throws Exception {
-    // Arrange: a domain somebody defined by hand, under a name the inventory uses
     connect
         .domainDefineXML(
             "<domain type='test'><name>legacy</name><memory unit='MiB'>1024</memory>"
@@ -351,11 +290,9 @@ public class HarmoniaLibvirtIT {
     Harmonia untouched = apply(Map.of(), 1);
     assertThat(untouched.failures()).isZero();
     assertThat(state("legacy").managed()).isFalse();
-    // Act
     Harmonia h = new Harmonia("it", connect);
     Plan plan = h.plan(inventory(server("legacy")), false);
     h.join(1);
-    // Assert
     assertThat(plan.getToCreate()).isEmpty();
     assertThat(plan.getToAdopt()).containsOnlyKeys("legacy");
     DomainState s = state("legacy");
@@ -367,7 +304,6 @@ public class HarmoniaLibvirtIT {
 
   @Test
   void preflight_findsWhatIsMissingOnTheHost_andNothingIsApplied() throws Exception {
-    // Arrange
     Server noPool = server("web-01");
     noPool.setPool("fast-ssd");
     Server noImage = server("web-02");
@@ -376,9 +312,7 @@ public class HarmoniaLibvirtIT {
     noNetwork.setNetwork("host-bridge");
     Harmonia h = new Harmonia("it", connect);
     h.plan(inventory(noPool, noImage, noNetwork), false);
-    // Act
     Preflight preflight = h.preflight();
-    // Assert
     assertThat(preflight.getProblems().keySet())
         .extracting(Preflight.Problem::resource)
         .contains("pool 'fast-ssd'", "image 'rocky-9.qcow2'", "network 'host-bridge'");
@@ -390,12 +324,8 @@ public class HarmoniaLibvirtIT {
 
   @Test
   void aCloneThatCannotBeBroughtToSize_isTakenBack_andTheVmIsSkipped() throws Exception {
-    // Arrange: no db-01.qcow2 in the pool, so the root disk is cloned from the base image, and the
-    // test driver refuses the resize that follows.
     Server db = server("db-01");
-    // Act
     Harmonia h = apply(inventory(db), 1);
-    // Assert
     assertThat(h.failures()).isEqualTo(1);
     assertThat(volumeExists(IMAGES + "db-01.qcow2")).isFalse();
     assertThat(volumeExists(IMAGES + BASE_IMAGE)).isTrue();

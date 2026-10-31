@@ -41,14 +41,6 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
-/**
- * Which volumes a new VM calls its own.
- *
- * <p>Only a volume created by this run is recorded in {@code <mnem:disks>} and may be deleted with
- * the VM. One found in the pool is attached as it is and recorded in {@code <mnem:reused-disks>};
- * Mnemosyne cannot tell a leftover of its own from a disk somebody put there, so it deletes neither
- * and says so. A creation that fails takes back only what it created itself.
- */
 @ExtendWith(MockitoExtension.class)
 @DisplayName("Harmonia, volume ownership at creation")
 public class HarmoniaVolumeOwnershipTest {
@@ -95,7 +87,6 @@ public class HarmoniaVolumeOwnershipTest {
     return t;
   }
 
-  /** Templates whose domain XML cannot be built: the failure comes after the volumes exist. */
   private Templates withoutInterface() throws IOException {
     String xml = Files.readString(Path.of(fixtures().getServerTmpl()), StandardCharsets.UTF_8);
     String stripped =
@@ -136,19 +127,16 @@ public class HarmoniaVolumeOwnershipTest {
     when(connect.storagePoolLookupByName("default")).thenReturn(pool);
   }
 
-  /** The root volume is already in the pool. */
   private void rootVolumeExists() throws LibvirtException {
     when(pool.storageVolLookupByName("qa-a.qcow2")).thenReturn(existing);
     when(existing.getPath()).thenReturn(IMAGES + "qa-a.qcow2");
   }
 
-  /** The root volume is not in the pool, and cloning the base image makes it. */
   private void rootVolumeIsCloned() throws LibvirtException {
     LibvirtException missing = notFound(Error.ErrorNumber.VIR_ERR_NO_STORAGE_VOL);
     when(pool.storageVolLookupByName("qa-a.qcow2")).thenThrow(missing);
     when(pool.storageVolLookupByName(BASE)).thenReturn(base);
     when(pool.storageVolCreateXMLFrom(anyString(), eq(base), eq(0))).thenReturn(cloned);
-    // Not asked for when the resize fails: the clone is deleted before its path is read.
     lenient().when(cloned.getPath()).thenReturn(IMAGES + "qa-a.qcow2");
   }
 
@@ -161,13 +149,10 @@ public class HarmoniaVolumeOwnershipTest {
   @Test
   void aRootVolumeFoundInThePool_isAttachedButRecordedAsReused_andTheReportSaysSo()
       throws Exception {
-    // Arrange
     emptyHost();
     rootVolumeExists();
     when(connect.domainDefineXML(anyString())).thenReturn(domain);
-    // Act
     create(server(fixtures()));
-    // Assert
     ArgumentCaptor<String> xml = ArgumentCaptor.forClass(String.class);
     verify(connect).domainDefineXML(xml.capture());
     DomainState state = XmlUtil.getShortState(xml.getValue());
@@ -187,13 +172,10 @@ public class HarmoniaVolumeOwnershipTest {
 
   @Test
   void aRootVolumeCreatedHere_isOwned() throws Exception {
-    // Arrange
     emptyHost();
     rootVolumeIsCloned();
     when(connect.domainDefineXML(anyString())).thenReturn(domain);
-    // Act
     create(server(fixtures()));
-    // Assert
     ArgumentCaptor<String> xml = ArgumentCaptor.forClass(String.class);
     verify(connect).domainDefineXML(xml.capture());
     DomainState state = XmlUtil.getShortState(xml.getValue());
@@ -204,15 +186,12 @@ public class HarmoniaVolumeOwnershipTest {
 
   @Test
   void aFailedCreation_deletesTheVolumeItCreated() throws Exception {
-    // Arrange
     emptyHost();
     rootVolumeIsCloned();
     LibvirtException noDomain = notFound(Error.ErrorNumber.VIR_ERR_NO_DOMAIN);
     when(connect.domainLookupByName("qa-a")).thenThrow(noDomain);
     when(connect.storageVolLookupByPath(IMAGES + "qa-a.qcow2")).thenReturn(cloned);
-    // Act
     create(server(withoutInterface()));
-    // Assert
     verify(cloned).delete(0);
     verify(connect, never()).domainDefineXML(anyString());
     assertThat(report())
@@ -222,12 +201,9 @@ public class HarmoniaVolumeOwnershipTest {
 
   @Test
   void aFailedCreation_neverDeletesAVolumeItFoundInThePool() throws Exception {
-    // Arrange
     emptyHost();
     rootVolumeExists();
-    // Act
     create(server(withoutInterface()));
-    // Assert
     verify(existing, never()).delete(anyInt());
     verify(connect, never()).storageVolLookupByPath(anyString());
     assertThat(report()).contains("· qa-a").doesNotContain("deleted");
@@ -235,14 +211,10 @@ public class HarmoniaVolumeOwnershipTest {
 
   @Test
   void aFailedCreation_keepsItsVolumeWhileADomainOfThatNameIsDefined() throws Exception {
-    // The volume may be under that domain; the operator gets its path instead of a broken VM.
-    // Arrange
     emptyHost();
     rootVolumeIsCloned();
     when(connect.domainLookupByName("qa-a")).thenReturn(domain);
-    // Act
     create(server(withoutInterface()));
-    // Assert
     verify(cloned, never()).delete(anyInt());
     assertThat(report())
         .contains(
@@ -251,20 +223,15 @@ public class HarmoniaVolumeOwnershipTest {
 
   @Test
   void aVolumeThatCannotBeResized_isStillRolledBackByStorageOps_notTwice() throws Exception {
-    // The clone that fails its resize is deleted inside StorageOps and never reaches `created`.
-    // Arrange
     emptyHost();
     rootVolumeIsCloned();
     when(cloned.resize(anyLong(), anyInt())).thenThrow(mock(LibvirtException.class));
-    // Act
     create(server(fixtures()));
-    // Assert
     verify(cloned).delete(0);
     verify(connect, never()).domainLookupByName(anyString());
     verify(connect, never()).domainDefineXML(any());
   }
 
-  /** A shut-down managed VM with only its root disk, and whatever {@code <mnem:disks>} records. */
   private static String managedDomainXml(String recorded) {
     return """
         <domain type='kvm'>
@@ -291,10 +258,6 @@ public class HarmoniaVolumeOwnershipTest {
         .formatted(recorded);
   }
 
-  /**
-   * The metadata {@code attachDisks} records for a data disk whose volume is already there, or null
-   * when it had nothing new to record.
-   */
   private String metadataAfterAttachingAnExistingVolume(String recorded) throws Exception {
     String data = IMAGES + "qa-a-data.qcow2";
     when(connect.listAllDomains(0)).thenReturn(new Domain[] {domain});
@@ -302,7 +265,6 @@ public class HarmoniaVolumeOwnershipTest {
     lenient().when(domain.getXMLDesc(0)).thenReturn(managedDomainXml(recorded));
     when(domain.isActive()).thenReturn(0);
     when(domain.getAutostart()).thenReturn(false);
-    // The root disk is the size the inventory asks for, so the plan has nothing to grow.
     StorageVolInfo info = mock(StorageVolInfo.class);
     info.capacity = 10L * 1024 * 1024 * 1024;
     when(connect.storageVolLookupByPath(IMAGES + "qa-a.qcow2")).thenReturn(base);
@@ -331,11 +293,9 @@ public class HarmoniaVolumeOwnershipTest {
 
   @Test
   void aDataDiskAddedLater_whoseVolumeIsAlreadyThere_isRecordedAsReused() throws Exception {
-    // Act
     String meta =
         metadataAfterAttachingAnExistingVolume(
             "<mnem:disk path='/var/lib/libvirt/images/qa-a.qcow2'/>");
-    // Assert
     assertThat(meta)
         .contains("<disks><disk path='" + IMAGES + "qa-a.qcow2'/></disks>")
         .contains("<reused-disks><volume path='" + IMAGES + "qa-a-data.qcow2'/></reused-disks>");
@@ -343,13 +303,10 @@ public class HarmoniaVolumeOwnershipTest {
 
   @Test
   void aRetriedAttach_findsTheVolumeThisVmCreatedLastTime_andItStaysOwned() throws Exception {
-    // The previous run created and recorded the volume, then failed to attach it.
-    // Act
     String meta =
         metadataAfterAttachingAnExistingVolume(
             "<mnem:disk path='/var/lib/libvirt/images/qa-a.qcow2'/>"
                 + "<mnem:disk path='/var/lib/libvirt/images/qa-a-data.qcow2'/>");
-    // Assert: already on the owned list, so nothing is rewritten and nothing moves to reused
     assertThat(meta).isNull();
   }
 }
