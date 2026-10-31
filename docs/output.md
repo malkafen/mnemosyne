@@ -40,6 +40,46 @@ Applying in 10s — Ctrl+C to abort...
       data 40G in pool 'default'
 ```
 
+## Networks
+
+A group with [networks or firewalls](networks.md) to create, change or delete gets a second block,
+`[ <group> · networks ]`, printed before its VMs — the order they are applied in. A group with
+nothing to do there prints no such block at all. Taken from a run against a real hypervisor:
+
+```
+--- Plan ---------------------------------------------------
+[ bm05 · networks ]  create: 2
+  + network sandbox  (nat 10.77.0.1/24, bridge virbr-sandbox)
+  + firewall agent  (default drop, 4 rules, anti-spoofing, seed allowed, dhcp allowed)
+      accept in tcp from 10.77.0.1 port 22  # ssh from the hypervisor
+      accept out udp to 8.8.8.8,1.1.1.1 port 53  # dns
+      accept out tcp to 192.168.17.10 port 22  # the one LAN service the agent may use
+      accept out icmp to 192.168.17.1
+
+[ bm05 ]  create: 2
+  + fw-agent-01
+  + fw-open-01
+```
+
+A later run that edits the rules and moves a second VM behind the same firewall:
+
+```
+--- Applied ------------------------------------------------
+[ bm05 · networks ]  update: 1
+  ~ firewall agent  (default drop, 5 rules, anti-spoofing, seed allowed, dhcp allowed, applied live to fw-agent-01)
+
+[ bm05 ]  update: 1
+  ~ fw-open-01  (firewall none->agent)
+```
+
+A network changed under running guests is redefined but not restarted:
+
+```
+[ bm05 · networks ]  update: 1
+  ~ network sandbox  (dhcp none->10.77.0.100-10.77.0.150)
+      running guests on it: fw-agent-01, fw-open-01 - restart the network yourself to apply: virsh net-destroy sandbox && virsh net-start sandbox
+```
+
 ## Notes
 
 Disk facts Mnemosyne will not act on. A VM with nothing but notes is counted separately, so

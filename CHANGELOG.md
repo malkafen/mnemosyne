@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Networks and firewalls ([docs/networks.md](docs/networks.md)). A group's `networks` declares
+  libvirt networks — `nat`, `route`, `isolated` or `bridge` — created before any VM, changed in
+  place, and deleted once nothing uses them; a name an unmanaged network holds blocks the run
+  instead of being taken over. `firewalls` declares named rule sets (accept / drop / reject, in /
+  out, tcp / udp / icmp, remote CIDRs, ports; first match wins, `default: drop` or `accept`) that a
+  server, or the whole group, references with `firewall:`. Each becomes a libvirt nwfilter
+  `mnem-<name>` on the VM's interface: enforced on the hypervisor, with anti-spoofing, replies,
+  DHCP and the VM's own seed server let through. Changing a firewall's rules or a server's
+  `firewall` applies live, without a restart.
+- A VM on a declared network gets a MAC derived from its id and a DHCP reservation for its
+  inventory `ip`, so it reaches the seed server on its first boot; a server's `gateway` defaults to
+  the network's address in `nat` and `route` mode.
 - A group may hold no VMs: `servers` can be left out or written empty, where an inventory used to
   be refused with "Server list must not be empty". The group still describes the connection, and
   the run brings that hypervisor down to zero managed domains. Until now the only way to empty a

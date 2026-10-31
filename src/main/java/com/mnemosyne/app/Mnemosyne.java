@@ -15,7 +15,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.StringJoiner;
-import java.util.stream.Collectors;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import picocli.CommandLine;
@@ -122,8 +121,15 @@ class Mnemosyne {
         Plan plan =
             i.harmonia.plan(
                 i.mnemon().getServers(), config.isDeleteDisable(), config.isPurgeDisks());
+        // Adoption touches neither networks nor firewalls, so they are not planned for it.
+        NetworkPlan netPlan =
+            config.isJoin()
+                ? null
+                : i.harmonia.planNetworks(
+                    i.mnemon().getNetworks(), i.mnemon().getFirewalls(), config.isDeleteDisable());
         // Adoption creates nothing, so there is nothing to check and nothing to audit for it.
         Preflight preflight = config.isJoin() ? new Preflight() : i.harmonia.preflight();
+        if (netPlan != null) netPlan.print(i.mnemon.getGroup(), preflight);
         plan.print(i.mnemon.getGroup(), config.isJoin(), preflight);
         if (!preflight.ok()) blocked.put(i.mnemon.getGroup(), preflight);
       }
@@ -306,12 +312,16 @@ class Mnemosyne {
 
   private void validateMnemone(Mnemon m) {
     Set<ConstraintViolation<Mnemon>> violations = validator.validate(m);
-    if (violations.isEmpty()) return;
-    String details =
-        violations.stream()
-            .sorted(Comparator.comparing(v -> v.getPropertyPath().toString()))
-            .map(v -> "  [" + v.getPropertyPath() + "] " + v.getMessage())
-            .collect(Collectors.joining("\n"));
+    List<String> lines =
+        new ArrayList<>(
+            violations.stream()
+                .sorted(Comparator.comparing(v -> v.getPropertyPath().toString()))
+                .map(v -> "  [" + v.getPropertyPath() + "] " + v.getMessage())
+                .toList());
+    // References between sections are only worth checking once every section is valid by itself.
+    if (lines.isEmpty()) m.referenceErrors().forEach(e -> lines.add("  " + e));
+    if (lines.isEmpty()) return;
+    String details = String.join("\n", lines);
     throw new IllegalArgumentException(
         "Invalid configuration for group '" + m.getGroup() + "':\n" + details);
   }

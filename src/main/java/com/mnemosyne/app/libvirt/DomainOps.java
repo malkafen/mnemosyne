@@ -210,6 +210,45 @@ class DomainOps {
     }
   }
 
+  /**
+   * Puts {@code filter} with {@code params} on the domain's first interface, or takes its filter
+   * off when {@code filter} is null.
+   *
+   * <p>The persistent config first, then the running guest: the live update is what makes the rules
+   * apply now, the config is what keeps them after the next boot. Each is built from its own XML,
+   * because the live interface carries a target device and an alias the stored one does not, and
+   * libvirt matches the device by its MAC, which both share. A live update QEMU refuses is not
+   * fatal: the config already has the filter and the next boot applies it, which the return value
+   * reports.
+   *
+   * @return whether the running guest has the new filter now (false for a stopped domain)
+   */
+  boolean updateFilter(String name, String filter, java.util.Map<String, String> params)
+      throws LibvirtException {
+    Domain d = connect.domainLookupByName(name);
+    try {
+      String config =
+          XmlUtil.interfaceWithFilter(d.getXMLDesc(Domain.XMLFlags.INACTIVE), filter, params);
+      log.trace("Interface XML for domain '{}' (config): {}", name, config);
+      d.updateDeviceFlags(config, Domain.DeviceModifyFlags.CONFIG);
+      if (d.isActive() != 1) return false;
+      try {
+        String live = XmlUtil.interfaceWithFilter(d.getXMLDesc(0), filter, params);
+        log.trace("Interface XML for domain '{}' (live): {}", name, live);
+        d.updateDeviceFlags(live, Domain.DeviceModifyFlags.LIVE);
+        return true;
+      } catch (LibvirtException e) {
+        log.debug("Domain '{}': live filter update failed, applies after restart", name, e);
+        return false;
+      }
+    } catch (LibvirtException e) {
+      log.debug("Failed to update the filter of domain '{}'", name, e);
+      throw e;
+    } finally {
+      freeDomainQuietly(d);
+    }
+  }
+
   void updateAutostart(String name, boolean autostart) throws LibvirtException {
     Domain d = connect.domainLookupByName(name);
     try {

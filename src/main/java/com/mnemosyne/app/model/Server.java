@@ -136,6 +136,72 @@ public class Server {
   /** Libvirt autostart; {@code null} leaves whatever the domain already has. */
   private Boolean autostart;
 
+  /**
+   * The name of a firewall from the group's {@code firewalls}, applied to the VM's interface; or
+   * {@value #NO_FIREWALL} to opt out of the group's default. Left out, the group's {@code firewall}
+   * applies; after loading it holds the firewall in effect, or null for none.
+   */
+  private String firewall;
+
+  /** What a server writes to opt out of the group's default firewall. */
+  public static final String NO_FIREWALL = "none";
+
+  /**
+   * The seed server's address and port, from {@code metaUrl}, resolved once when the inventory is
+   * loaded. They reach the firewall as filter parameters, so a VM behind a {@code default: drop}
+   * firewall can still fetch its cloud-init. Null when {@code metaUrl} does not resolve.
+   */
+  private String seedIp;
+
+  private int seedPort;
+
+  /**
+   * The MAC of the VM's interface, set only for a VM on a network the inventory declares: that
+   * network's DHCP hands the VM its inventory {@code ip} against this MAC on the first boot, which
+   * is how the guest reaches the seed server before cloud-init has configured anything. Null leaves
+   * the MAC to libvirt.
+   */
+  private String mac;
+
+  /**
+   * A MAC derived from the server id: locally administered under QEMU's {@code 52:54:00} prefix,
+   * the same on every run, so the reservation made for it can be found and taken back again.
+   */
+  public static String macFor(String serverId) {
+    String hex = Sha256Util.sha256Hex(serverId);
+    return "52:54:00:"
+        + hex.substring(0, 2)
+        + ":"
+        + hex.substring(2, 4)
+        + ":"
+        + hex.substring(4, 6);
+  }
+
+  /** The address alone, without its prefix. */
+  public String ipAddress() {
+    return ip == null ? null : ip.contains("/") ? ip.substring(0, ip.indexOf('/')) : ip;
+  }
+
+  /** The nwfilter this VM's interface should reference, or null for none. */
+  public String desiredFilter() {
+    return firewall == null ? null : FirewallSpec.FILTER_PREFIX + firewall;
+  }
+
+  /**
+   * The parameters the VM's filterref carries: its own address for anti-spoofing, and its seed
+   * server. Empty when the VM has no firewall.
+   */
+  public Map<String, String> filterParams() {
+    if (firewall == null) return Map.of();
+    Map<String, String> p = new java.util.TreeMap<>();
+    if (ip != null) p.put("IP", ipAddress());
+    if (seedIp != null) {
+      p.put(FirewallSpec.SEED_IP_VAR, seedIp);
+      p.put(FirewallSpec.SEED_PORT_VAR, String.valueOf(seedPort));
+    }
+    return Map.copyOf(p);
+  }
+
   /** An {@code extraDisks:} key present but empty deserializes to null; an absent list is fine. */
   public void setExtraDisks(List<ExtraDisk> extraDisks) {
     this.extraDisks = extraDisks == null ? List.of() : extraDisks;
@@ -540,6 +606,28 @@ public class Server {
           missing(this.templates.getServerTmpl(), "<source> inside <interface>"));
     }
     source.setAttribute("network", this.network);
+
+    if (this.mac != null) {
+      removeChildren(iface, "mac");
+      Element mac = doc.createElement("mac");
+      mac.setAttribute("address", this.mac);
+      iface.insertBefore(mac, iface.getFirstChild());
+    }
+
+    String filter = desiredFilter();
+    if (filter == null) return;
+    removeChildren(iface, "filterref");
+    Element ref = doc.createElement("filterref");
+    ref.setAttribute("filter", filter);
+    new java.util.TreeMap<>(filterParams())
+        .forEach(
+            (k, v) -> {
+              Element p = doc.createElement("parameter");
+              p.setAttribute("name", k);
+              p.setAttribute("value", v);
+              ref.appendChild(p);
+            });
+    iface.appendChild(ref);
   }
 
   // YAML builders

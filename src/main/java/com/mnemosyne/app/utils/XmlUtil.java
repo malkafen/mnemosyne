@@ -3,14 +3,18 @@ package com.mnemosyne.app.utils;
 import com.mnemosyne.app.exception.*;
 import com.mnemosyne.app.model.DomainState;
 import com.mnemosyne.app.model.DomainState.Disk;
+import com.mnemosyne.app.model.DomainState.Nic;
 import com.mnemosyne.app.model.InitMarker;
+import com.mnemosyne.app.model.NetState;
 import java.io.IOException;
 import java.io.StringReader;
 import java.io.StringWriter;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
+import java.util.TreeMap;
 import javax.xml.XMLConstants;
 import javax.xml.parsers.DocumentBuilder;
 import javax.xml.parsers.DocumentBuilderFactory;
@@ -23,14 +27,14 @@ import javax.xml.transform.dom.DOMSource;
 import javax.xml.transform.stream.StreamResult;
 import org.w3c.dom.Document;
 import org.w3c.dom.Element;
+import org.w3c.dom.Node;
 import org.w3c.dom.NodeList;
 import org.xml.sax.InputSource;
 import org.xml.sax.SAXException;
 
 public class XmlUtil {
 
-  private static Document parse(String xml)
-      throws ParserConfigurationException, SAXException, IOException {
+  static Document parse(String xml) throws ParserConfigurationException, SAXException, IOException {
     DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
     // Harden against XXE: domain XML is trusted, but disabling DTDs is cheap and correct.
     factory.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true);
@@ -88,7 +92,19 @@ public class XmlUtil {
       Element meta = firstNS(doc, MNEM_NS, "mnemosyne");
       if (meta == null) {
         return new DomainState(
-            name, cpu, ram, null, null, null, disks(doc), false, false, List.of(), List.of(), null);
+            name,
+            cpu,
+            ram,
+            null,
+            null,
+            null,
+            disks(doc),
+            false,
+            false,
+            List.of(),
+            List.of(),
+            null,
+            nics(doc));
       }
 
       // <mnem:disks> lists the volumes Mnemosyne created; only those go when the domain does.
@@ -116,7 +132,8 @@ public class XmlUtil {
           false,
           detached,
           List.copyOf(reused),
-          init(meta));
+          init(meta),
+          nics(doc));
     } catch (ParserConfigurationException | SAXException | IOException e) {
       throw new XmlParseException("Failed to parse domain XML", e);
     }
@@ -307,5 +324,255 @@ public class XmlUtil {
 
   private static List<String> diskPaths(Document doc) {
     return disks(doc).stream().map(Disk::path).toList();
+  }
+
+  /** Escapes text for an XML attribute or element written by hand. */
+  public static String escape(String s) {
+    if (s == null) return "";
+    return s.replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+        .replace("'", "&apos;")
+        .replace("\"", "&quot;");
+  }
+
+  /**
+   * Every {@code <interface>} of a domain directly under {@code <devices>}, in document order: the
+   * libvirt network it is attached to (null for a bridge or direct interface) and its {@code
+   * <filterref>}, with parameters.
+   */
+  public static List<Nic> nics(Document doc) {
+    List<Nic> found = new ArrayList<>();
+    NodeList ifaces = doc.getElementsByTagName("interface");
+    for (int i = 0; i < ifaces.getLength(); i++) {
+      Element iface = (Element) ifaces.item(i);
+      if (iface.getParentNode() == null || !"devices".equals(iface.getParentNode().getNodeName()))
+        continue;
+      Element source = child(iface, "source");
+      String network = source == null ? null : clean(source.getAttribute("network"));
+      if (!"network".equals(iface.getAttribute("type"))) network = null;
+      Element ref = child(iface, "filterref");
+      String filter = ref == null ? null : clean(ref.getAttribute("filter"));
+      Map<String, String> params = new TreeMap<>();
+      if (ref != null) {
+        for (Element p : children(ref, "parameter"))
+          params.put(p.getAttribute("name"), p.getAttribute("value"));
+      }
+      Element macEl = child(iface, "mac");
+      String mac = macEl == null ? null : clean(macEl.getAttribute("address"));
+      found.add(new Nic(network, filter, Map.copyOf(params), mac));
+    }
+    return List.copyOf(found);
+  }
+
+  /**
+   * The first {@code <interface>} of a domain's XML with its {@code <filterref>} replaced by {@code
+   * filter} and {@code params}, or removed when {@code filter} is null: the device XML {@code
+   * virDomainUpdateDeviceFlags} takes. The rest of the interface — its MAC above all, which is how
+   * libvirt finds the device to update — is passed through as the host reported it.
+   */
+  public static String interfaceWithFilter(
+      String domainXml, String filter, Map<String, String> params) {
+    try {
+      Document doc = parse(domainXml);
+      Element iface = null;
+      NodeList ifaces = doc.getElementsByTagName("interface");
+      for (int i = 0; i < ifaces.getLength() && iface == null; i++) {
+        Element e = (Element) ifaces.item(i);
+        if (e.getParentNode() != null && "devices".equals(e.getParentNode().getNodeName()))
+          iface = e;
+      }
+      if (iface == null) throw new XmlParseException("Domain has no <interface> to filter");
+      for (Element old : children(iface, "filterref")) iface.removeChild(old);
+      if (filter != null) {
+        Element ref = doc.createElement("filterref");
+        ref.setAttribute("filter", filter);
+        new TreeMap<>(params)
+            .forEach(
+                (k, v) -> {
+                  Element p = doc.createElement("parameter");
+                  p.setAttribute("name", k);
+                  p.setAttribute("value", v);
+                  ref.appendChild(p);
+                });
+        iface.appendChild(ref);
+      }
+      return serializeFragment(iface, "interface filter");
+    } catch (ParserConfigurationException | SAXException | IOException e) {
+      throw new XmlParseException("Failed to parse domain XML", e);
+    }
+  }
+
+  /** Whether the network's metadata carries {@code <mnem:managedBy>mnemosyne</mnem:managedBy>}. */
+  public static boolean networkManaged(String networkXml) {
+    try {
+      Document doc = parse(networkXml);
+      Element meta = firstNS(doc, MNEM_NS, "mnemosyne");
+      return meta != null && "mnemosyne".equals(textNS(meta, MNEM_NS, "managedBy"));
+    } catch (ParserConfigurationException | SAXException | IOException e) {
+      throw new XmlParseException("Failed to parse network XML", e);
+    }
+  }
+
+  /**
+   * The parts of a network's XML the inventory can describe. A {@code <forward>} without a mode is
+   * libvirt's NAT; no {@code <forward>} at all is an isolated network. Only the first IPv4 {@code
+   * <ip>} and the first DHCP range are read.
+   */
+  public static NetState.Shape networkShape(String networkXml) {
+    try {
+      Document doc = parse(networkXml);
+      Element root = doc.getDocumentElement();
+      Element forward = child(root, "forward");
+      String mode;
+      if (forward == null) mode = "isolated";
+      else {
+        String m = clean(forward.getAttribute("mode"));
+        mode = m == null ? "nat" : m;
+      }
+      Element bridgeEl = child(root, "bridge");
+      String bridge = bridgeEl == null ? null : clean(bridgeEl.getAttribute("name"));
+
+      String address = null;
+      String dhcp = null;
+      for (Element ip : children(root, "ip")) {
+        String family = clean(ip.getAttribute("family"));
+        if (family != null && !"ipv4".equals(family)) continue;
+        String addr = clean(ip.getAttribute("address"));
+        if (addr == null) continue;
+        String prefix = clean(ip.getAttribute("prefix"));
+        String netmask = clean(ip.getAttribute("netmask"));
+        int p =
+            prefix != null
+                ? Integer.parseInt(prefix)
+                : netmask != null ? Ipv4.prefixOf(netmask) : 32;
+        address = addr + "/" + p;
+        Element dhcpEl = child(ip, "dhcp");
+        Element range = dhcpEl == null ? null : child(dhcpEl, "range");
+        if (range != null) dhcp = range.getAttribute("start") + "-" + range.getAttribute("end");
+        break;
+      }
+      return new NetState.Shape(mode, address, bridge, dhcp);
+    } catch (ParserConfigurationException | SAXException | IOException e) {
+      throw new XmlParseException("Failed to parse network XML", e);
+    }
+  }
+
+  /**
+   * The DHCP host reservations of a network's first IPv4 {@code <ip>}, each as its own {@code <host
+   * .../>} element, ready to be written back into a redefined network.
+   */
+  public static List<String> dhcpHosts(String networkXml) {
+    try {
+      Element root = parse(networkXml).getDocumentElement();
+      for (Element ip : children(root, "ip")) {
+        String family = clean(ip.getAttribute("family"));
+        if (family != null && !"ipv4".equals(family)) continue;
+        Element dhcp = child(ip, "dhcp");
+        if (dhcp == null) return List.of();
+        List<String> hosts = new ArrayList<>();
+        for (Element h : children(dhcp, "host"))
+          hosts.add(serializeFragment(h, "dhcp host").trim());
+        return List.copyOf(hosts);
+      }
+      return List.of();
+    } catch (ParserConfigurationException | SAXException | IOException e) {
+      throw new XmlParseException("Failed to parse network XML", e);
+    }
+  }
+
+  /** The {@code <uuid>} of a network or filter XML, or null. */
+  public static String uuid(String xml) {
+    try {
+      Element u = child(parse(xml).getDocumentElement(), "uuid");
+      return u == null ? null : clean(u.getTextContent());
+    } catch (ParserConfigurationException | SAXException | IOException e) {
+      throw new XmlParseException("Failed to parse XML", e);
+    }
+  }
+
+  /**
+   * A network filter reduced to what decides its behaviour, for comparing the host's copy with the
+   * inventory's: the chain, and every filterref and rule with its attributes sorted. The uuid and
+   * the order libvirt prints things in are left out; rules carry their priority, which is what
+   * orders them.
+   */
+  public static List<String> canonicalFilter(String filterXml) {
+    try {
+      Element root = parse(filterXml).getDocumentElement();
+      List<String> lines = new ArrayList<>();
+      String chain = clean(root.getAttribute("chain"));
+      lines.add("chain=" + (chain == null ? "root" : chain));
+      for (Node n = root.getFirstChild(); n != null; n = n.getNextSibling()) {
+        if (!(n instanceof Element e)) continue;
+        switch (e.getTagName()) {
+          case "filterref" -> {
+            StringBuilder sb = new StringBuilder("ref " + e.getAttribute("filter"));
+            Map<String, String> params = new TreeMap<>();
+            for (Element p : children(e, "parameter"))
+              params.put(p.getAttribute("name"), p.getAttribute("value"));
+            params.forEach((k, v) -> sb.append(' ').append(k).append('=').append(v));
+            lines.add(sb.toString());
+          }
+          case "rule" -> {
+            StringBuilder sb =
+                new StringBuilder(
+                    String.format(
+                        "rule %s %s %s",
+                        e.getAttribute("action"),
+                        e.getAttribute("direction"),
+                        e.hasAttribute("priority") ? e.getAttribute("priority") : "500"));
+            for (Node c = e.getFirstChild(); c != null; c = c.getNextSibling()) {
+              if (!(c instanceof Element proto)) continue;
+              sb.append(' ').append(proto.getTagName());
+              sb.append(sortedAttributes(proto));
+            }
+            lines.add(sb.toString());
+          }
+          default -> {
+            // uuid and anything else libvirt adds carry no behaviour
+          }
+        }
+      }
+      List<String> sorted = new ArrayList<>(lines);
+      java.util.Collections.sort(sorted);
+      return List.copyOf(sorted);
+    } catch (ParserConfigurationException | SAXException | IOException e) {
+      throw new XmlParseException("Failed to parse network filter XML", e);
+    }
+  }
+
+  private static String sortedAttributes(Element e) {
+    Map<String, String> attrs = new TreeMap<>();
+    var map = e.getAttributes();
+    for (int i = 0; i < map.getLength(); i++) {
+      Node a = map.item(i);
+      String value = a.getNodeValue();
+      // libvirt prints a state list as it was given; the order of its words means nothing
+      if ("state".equals(a.getNodeName())) {
+        String[] words = value.split(",");
+        java.util.Arrays.sort(words);
+        value = String.join(",", words);
+      }
+      attrs.put(a.getNodeName(), value);
+    }
+    StringBuilder sb = new StringBuilder();
+    attrs.forEach((k, v) -> sb.append(' ').append(k).append('=').append(v));
+    return sb.toString();
+  }
+
+  /** The first direct child element named {@code tag}, or null. */
+  private static Element child(Element parent, String tag) {
+    for (Node n = parent.getFirstChild(); n != null; n = n.getNextSibling())
+      if (n instanceof Element e && tag.equals(e.getTagName())) return e;
+    return null;
+  }
+
+  /** Every direct child element named {@code tag}. */
+  private static List<Element> children(Element parent, String tag) {
+    List<Element> found = new ArrayList<>();
+    for (Node n = parent.getFirstChild(); n != null; n = n.getNextSibling())
+      if (n instanceof Element e && tag.equals(e.getTagName())) found.add(e);
+    return found;
   }
 }

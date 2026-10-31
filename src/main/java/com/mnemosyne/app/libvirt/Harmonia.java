@@ -7,11 +7,16 @@ import com.mnemosyne.app.libvirt.StorageOps.Provisioned;
 import com.mnemosyne.app.libvirt.StorageOps.VolumeSpec;
 import com.mnemosyne.app.model.DomainState;
 import com.mnemosyne.app.model.ExtraDisk;
+import com.mnemosyne.app.model.FirewallSpec;
 import com.mnemosyne.app.model.InitMarker;
+import com.mnemosyne.app.model.NetState;
+import com.mnemosyne.app.model.NetworkPlan;
+import com.mnemosyne.app.model.NetworkSpec;
 import com.mnemosyne.app.model.Plan;
 import com.mnemosyne.app.model.Preflight;
 import com.mnemosyne.app.model.Server;
 import com.mnemosyne.app.output.Report;
+import com.mnemosyne.app.utils.Ipv4;
 import com.mnemosyne.app.utils.TargetDev;
 import java.io.IOException;
 import java.time.Instant;
@@ -56,6 +61,12 @@ public class Harmonia implements AutoCloseable {
   private final Connect connect;
   private final String group;
   private Plan plan;
+
+  /** The networks and firewalls of this group, planned after the VMs; null when never asked. */
+  private NetworkPlan netPlan;
+
+  /** The inventory's servers of this group, as the plan was built from them. */
+  private Map<String, Server> servers = Map.of();
 
   /**
    * The domains as they were when the plan was built. Kept so preflight can tell whether a volume
@@ -119,8 +130,116 @@ public class Harmonia implements AutoCloseable {
   public Plan plan(Map<String, Server> servers, boolean deleteDisable, boolean purgeDisks)
       throws LibvirtException {
     this.actual = withDiskCapacities(domainOps.readActualState());
+    this.servers = servers;
     this.plan = new Plan(this.actual, servers, deleteDisable, purgeDisks);
     return this.plan;
+  }
+
+  /**
+   * Plans the group's networks and firewalls against the host. Called after {@link #plan}, whose
+   * snapshot and VM plan it uses to tell what each network and filter will still be used by.
+   *
+   * <p>The filters are read separately from the networks, and a host that cannot list them — no
+   * nwfilter driver — is not an error here: it only matters if the inventory asks for a firewall,
+   * and preflight says so then.
+   */
+  public NetworkPlan planNetworks(
+      Map<String, NetworkSpec> networks, Map<String, FirewallSpec> firewalls, boolean deleteDisable)
+      throws LibvirtException {
+    List<NetState> nets = networkOps.readNetworks();
+    List<NetworkPlan.FilterState> filters;
+    try {
+      filters = networkOps.readFilters();
+    } catch (LibvirtException e) {
+      log.debug("[ {} ] network filters cannot be read: {}", group, e.getMessage(), e);
+      filters = null;
+    }
+    this.netPlan =
+        new NetworkPlan(
+            networks,
+            firewalls,
+            nets,
+            filters,
+            this.actual,
+            this.plan,
+            this.servers,
+            deleteDisable);
+    return this.netPlan;
+  }
+
+  public NetworkPlan networkPlan() {
+    return netPlan;
+  }
+
+  /**
+   * What the declared networks and firewalls need from the host, and the conflicts they would run
+   * into: a name an unmanaged network holds, an address range another network already uses, and a
+   * host that has no nwfilter driver for the firewalls. A problem is charged to the network or
+   * firewall and to every server on it, so the plan shows both why and what is held up.
+   */
+  private void preflightNetworks(Preflight preflight) {
+    if (netPlan == null) return;
+
+    netPlan
+        .getNetTaken()
+        .forEach(
+            (name, why) ->
+                preflight.add(
+                    new Preflight.Problem("network '" + name + "'", why), onNetwork(name)));
+
+    Map<String, NetworkSpec> changing = new LinkedHashMap<>(netPlan.getNetCreate());
+    netPlan.getNetUpdate().forEach((name, u) -> changing.put(name, u.spec()));
+    changing.forEach(
+        (name, spec) -> {
+          if (spec.getAddress() == null) return;
+          Ipv4.Cidr mine = spec.cidr();
+          for (NetState other : netPlan.getHostNetworks()) {
+            if (other.name().equals(name) || other.shape().address() == null) continue;
+            if (changing.containsKey(other.name())) continue; // compared by validation already
+            if (mine.overlaps(Ipv4.cidr(other.shape().address())))
+              preflight.add(
+                  new Preflight.Problem(
+                      "network '" + name + "'",
+                      spec.getAddress()
+                          + " overlaps network '"
+                          + other.name()
+                          + "' ("
+                          + other.shape().address()
+                          + ") on the host"),
+                  onNetwork(name));
+          }
+        });
+
+    boolean wantsFilters =
+        !netPlan.getFilterCreate().isEmpty() || !netPlan.getFilterUpdate().isEmpty();
+    if (!netPlan.isFiltersKnown() && wantsFilters) {
+      networkOps
+          .checkFilters()
+          .or(
+              () ->
+                  java.util.Optional.of(
+                      new Preflight.Problem(
+                          "nwfilter", "the host's network filters cannot be read")))
+          .ifPresent(
+              p -> {
+                List<String> ids = new ArrayList<>();
+                netPlan.getFilterCreate().keySet().forEach(n -> ids.add(NetworkPlan.fwId(n)));
+                servers.values().stream()
+                    .filter(sv -> sv.getFirewall() != null)
+                    .forEach(sv -> ids.add(sv.getId()));
+                preflight.add(p, ids);
+              });
+    }
+  }
+
+  /** The preflight ids held up by a network: the network itself and every server on it. */
+  private List<String> onNetwork(String name) {
+    List<String> ids = new ArrayList<>();
+    ids.add(NetworkPlan.netId(name));
+    servers.values().stream()
+        .filter(sv -> name.equals(sv.getNetwork()))
+        .forEach(sv -> ids.add(sv.getId()));
+    return ids;
   }
 
   /**
@@ -174,6 +293,7 @@ public class Harmonia implements AutoCloseable {
     }
     refuseShrinks(preflight);
     refuseUnknownInit(preflight);
+    preflightNetworks(preflight);
 
     List<Server> creating = List.copyOf(this.plan.getToCreate().values());
     List<Plan.Update> attaching =
@@ -224,6 +344,10 @@ public class Harmonia implements AutoCloseable {
       }
     }
     for (List<Server> needed : byNetwork.values()) {
+      // A network the inventory declares is created before any VM; preflightNetworks checks it.
+      if (netPlan != null
+          && (netPlan.getNetCreate().containsKey(needed.get(0).getNetwork())
+              || netPlan.getNetUpdate().containsKey(needed.get(0).getNetwork()))) continue;
       networkOps
           .checkNetwork(needed.get(0).getNetwork())
           .ifPresent(p -> preflight.add(p, ids(needed)));
@@ -350,13 +474,139 @@ public class Harmonia implements AutoCloseable {
       return;
     }
     Report report = new Report();
+    Report netReport = new Report();
     try {
+      // Filters and networks first: a VM created or refiltered below must find them in place.
+      applyNetworks(netReport);
       phase("delete", plan.getToDelete().entrySet(), this::deleteOne, report, parallel);
       phase("update", plan.getToUpdate().values(), this::updateOne, report, parallel);
       phase("create", plan.getToCreate().values(), this::createOne, report, parallel);
+      // And removed last, once the VMs that used them are gone or moved off.
+      removeNetworks(netReport);
     } finally {
+      netReport.print(group + " · networks");
       report.print(group);
-      failures += report.skipped();
+      failures += report.skipped() + netReport.skipped();
+    }
+  }
+
+  /**
+   * Takes back the DHCP reservations a deleted VM held on the networks Mnemosyne manages, so its
+   * address is free for the next VM. Never fails the delete: the VM is gone either way.
+   */
+  private void releaseReservations(String domainName) {
+    if (netPlan == null) return;
+    Set<String> managed = new LinkedHashSet<>();
+    netPlan.getHostNetworks().stream()
+        .filter(NetState::managed)
+        .forEach(n -> managed.add(n.name()));
+    this.actual.stream()
+        .filter(d -> domainName.equals(d.name()))
+        .flatMap(d -> d.nics().stream())
+        .filter(n -> n.mac() != null && n.network() != null && managed.contains(n.network()))
+        .forEach(n -> networkOps.releaseDhcp(n.network(), n.mac()));
+  }
+
+  /** Creates and updates the group's filters, then its networks. One at a time: there are few. */
+  private void applyNetworks(Report report) {
+    if (netPlan == null) return;
+    netPlan
+        .getFilterCreate()
+        .forEach(
+            (name, spec) -> {
+              try {
+                networkOps.defineFilter(spec.filterName(), spec.toXml(null));
+                report.add("create", "+", "firewall " + name, spec.describe());
+              } catch (LibvirtException | RuntimeException e) {
+                log.debug("[ {} ] firewall '{}' create failed", group, name, e);
+                report.skip("firewall " + name, "create failed: " + cause(e));
+              }
+            });
+    netPlan
+        .getFilterUpdate()
+        .forEach(
+            (name, u) -> {
+              try {
+                networkOps.defineFilter(u.spec().filterName(), u.spec().toXml(u.uuid()));
+                report.add(
+                    "update",
+                    "~",
+                    "firewall " + name,
+                    u.spec().describe()
+                        + (u.running().isEmpty()
+                            ? ""
+                            : ", applied live to " + String.join(", ", u.running())));
+              } catch (LibvirtException | RuntimeException e) {
+                log.debug("[ {} ] firewall '{}' update failed", group, name, e);
+                report.skip("firewall " + name, "update failed: " + cause(e));
+              }
+            });
+    netPlan
+        .getNetCreate()
+        .forEach(
+            (name, spec) -> {
+              try {
+                networkOps.defineNetwork(name, spec.toXml(null), spec.isAutostart());
+                report.add("create", "+", "network " + name, spec.describe());
+              } catch (LibvirtException | RuntimeException e) {
+                log.debug("[ {} ] network '{}' create failed", group, name, e);
+                report.skip("network " + name, "create failed: " + cause(e));
+              }
+            });
+    netPlan.getNetUpdate().forEach((name, u) -> updateNetwork(name, u, report));
+  }
+
+  private void updateNetwork(String name, NetworkPlan.NetUpdate u, Report report) {
+    try {
+      List<String> lines = new ArrayList<>();
+      if (u.redefine()) {
+        // Defining over a running network writes its persistent config only.
+        networkOps.defineNetwork(
+            name,
+            u.spec().toXml(u.actual().uuid(), networkOps.dhcpHosts(name)),
+            u.spec().isAutostart());
+        if (u.restartable()) networkOps.restartNetwork(name);
+        else if (u.actual().active())
+          lines.add(
+              "running guests on it: "
+                  + String.join(", ", u.running())
+                  + " - restart the network yourself to apply: virsh net-destroy "
+                  + name
+                  + " && virsh net-start "
+                  + name);
+      } else {
+        if (u.autostartChanged()) networkOps.setNetworkAutostart(name, u.spec().isAutostart());
+        if (u.start()) networkOps.startNetwork(name);
+      }
+      report.add("update", "~", "network " + name, u.describe());
+      report.sub(lines);
+    } catch (LibvirtException | RuntimeException e) {
+      log.debug("[ {} ] network '{}' update failed", group, name, e);
+      report.skip("network " + name, "update failed: " + cause(e));
+    }
+  }
+
+  /** Deletes the managed networks and filters the inventory no longer has and nothing uses. */
+  private void removeNetworks(Report report) {
+    if (netPlan == null) return;
+    for (String name : netPlan.getNetDelete()) {
+      try {
+        networkOps.deleteNetwork(name);
+        report.add("delete", "-", "network " + name, "");
+      } catch (LibvirtException | RuntimeException e) {
+        log.debug("[ {} ] network '{}' delete failed", group, name, e);
+        report.skip("network " + name, "delete failed: " + cause(e));
+      }
+    }
+    for (String name : netPlan.getFilterDelete()) {
+      String label = "firewall " + name.substring(FirewallSpec.FILTER_PREFIX.length());
+      try {
+        networkOps.deleteFilter(name);
+        report.add("delete", "-", label, "");
+      } catch (LibvirtException | RuntimeException e) {
+        log.debug("[ {} ] filter '{}' delete failed", group, name, e);
+        report.skip(label, "delete failed: " + cause(e));
+      }
     }
   }
 
@@ -470,6 +720,7 @@ public class Harmonia implements AutoCloseable {
       domainOps.destroyDomain(name);
       domainOps.undefineDomain(name);
       storageOps.deleteVolumes(diskPaths, name);
+      releaseReservations(name);
       List<String> kept = plan.getKept().get(name);
       report.add("delete", "-", name, diskPaths.isEmpty() && kept.isEmpty() ? "no disks" : "");
       report.sub(diskPaths);
@@ -491,6 +742,12 @@ public class Harmonia implements AutoCloseable {
       // so there is never anything to grow among the ones this run added.
       List<String> diskLines = new ArrayList<>(attachDisks(u));
       diskLines.addAll(growDisks(u));
+      if (u.firewallChanged()) {
+        boolean live = domainOps.updateFilter(name, s.desiredFilter(), s.filterParams());
+        if (u.actual().active() && !live)
+          diskLines.add(
+              "firewall: the running guest refused the change - applies after power cycle");
+      }
       if (u.cpuChanged()) domainOps.updateCpu(name, s.getCpu());
       if (u.ramChanged()) domainOps.updateRam(name, s.getRam());
       if (u.autostartChanged()) domainOps.updateAutostart(name, s.getAutostart());
@@ -687,6 +944,9 @@ public class Harmonia implements AutoCloseable {
       DomainSpec domainSpec =
           new DomainSpec(s.getName(), s.buildServerXml(), true, s.getAutostart());
       CloudInitServer.register(s.buildSeed(), () -> confirmInit(s));
+      // Before the domain exists, so its first DHCP request already gets the inventory address.
+      if (s.getMac() != null)
+        networkOps.reserveDhcp(s.getNetwork(), s.getMac(), s.ipAddress(), s.getName());
       domainOps.setupDomain(domainSpec);
       if (!s.isLaunch()) toSettle.add(s.getId());
       report.add("create", "+", s.getId(), s.isLaunch() ? "" : "off after init");

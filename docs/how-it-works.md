@@ -140,7 +140,9 @@ printed, so a plan that cannot work is never started:
 - every storage pool exists and is running;
 - the pool of a VM being created holds the base image `volLookup` (looked up in libvirt's cache
   first, and the pool refreshed only if it is missing, so a freshly copied image is found);
-- the libvirt `network` exists and is running;
+- the libvirt `network` exists and is running, unless the inventory declares it under `networks`;
+- a declared network's name is not held by an unmanaged network and its address does not overlap
+  a network already on the host; a host that declares a firewall has the nwfilter driver;
 - the template files are readable on the machine running Mnemosyne;
 - no volume Mnemosyne is about to write to is already attached to a different domain.
 
@@ -150,7 +152,10 @@ and one blocked VM stops the whole run. `--join` creates nothing and is not chec
 
 ## Applying
 
-Each group is reconciled in the order **delete → update → create**:
+Each group is reconciled in the order **delete → update → create**, framed by its
+[networks and firewalls](networks.md): filters and networks are created or changed first, so a VM
+created or refiltered in the same run finds them, and the ones leaving the inventory are deleted
+last, once the VMs that used them are gone:
 
 ```mermaid
 flowchart TB
@@ -211,11 +216,17 @@ src/main/java/com/mnemosyne/app/
   libvirt/Harmonia.java       per-group orchestration: plan, preflight, reconcile, join
   libvirt/DomainOps.java      define, boot, destroy, undefine, update, read metadata
   libvirt/StorageOps.java     clone, create, resize and delete volumes; pool and image checks
-  libvirt/NetworkOps.java     libvirt network checks
+  model/NetworkSpec.java      one entry of networks; its network XML
+  model/FirewallSpec.java     one entry of firewalls; its nwfilter XML
+  model/FirewallRule.java     one firewall rule
+  model/NetworkPlan.java      create/update/delete diff of networks and filters
+  model/NetState.java         snapshot of a live network
+  libvirt/NetworkOps.java     networks, filters and DHCP reservations; network checks
   http/CloudInitServer.java   NoCloud seed server and phone_home tracking
   output/Report.java          plan/preflight/applied console blocks
   utils/XmlUtil.java          domain XML parsing and metadata rewriting
   utils/TargetDev.java        free <target dev> names for extra disks
+  utils/Ipv4.java             CIDR parsing, containment and overlap
 configs/                      inventory example
 templates/                    domain and volume XML, cloud-init YAML
 ```

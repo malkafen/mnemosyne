@@ -88,6 +88,30 @@ public final class Plan {
     }
 
     /**
+     * Whether the VM's interface has to change filter, or the parameters of the one it has.
+     *
+     * <p>A filter that is not Mnemosyne's ({@code mnem-*}) and that the inventory does not replace
+     * is somebody else's, and is left alone: a VM without {@code firewall} keeps whatever was put
+     * on it by hand. A domain with no interface has nothing to put a filter on.
+     */
+    public boolean firewallChanged() {
+      Optional<DomainState.Nic> nic = actual.primaryNic();
+      if (nic.isEmpty()) return false;
+      String want = server.desiredFilter();
+      String have = nic.get().filter();
+      if (want == null) return have != null && have.startsWith(FirewallSpec.FILTER_PREFIX);
+      return !want.equals(have) || !server.filterParams().equals(nic.get().params());
+    }
+
+    /** The filter on the VM's interface now, without the prefix Mnemosyne gives its own. */
+    private String firewallName(String filter) {
+      if (filter == null) return "none";
+      return filter.startsWith(FirewallSpec.FILTER_PREFIX)
+          ? filter.substring(FirewallSpec.FILTER_PREFIX.length())
+          : filter;
+    }
+
+    /**
      * Whether this entry is worth applying, as opposed to only worth mentioning.
      *
      * <p>A shrink is deliberately absent: it is the one piece of drift that is never applied, and
@@ -99,7 +123,8 @@ public final class Plan {
           || autostartChanged()
           || powerChanged()
           || disksChanged()
-          || growChanged();
+          || growChanged()
+          || firewallChanged();
     }
 
     public String diff() {
@@ -117,6 +142,14 @@ public final class Plan {
                 ", attach '%s' %dG as %s", a.disk().getName(), a.disk().getSize(), a.target()));
       for (DiskGrow g : toGrow)
         sb.append(String.format(", grow %s %dG->%dG", g.label(), g.fromGiB(), g.toGiB()));
+      if (firewallChanged()) {
+        String have = firewallName(actual.primaryNic().map(DomainState.Nic::filter).orElse(null));
+        String want = firewallName(server.desiredFilter());
+        sb.append(
+            have.equals(want)
+                ? String.format(", firewall %s parameters", want)
+                : String.format(", firewall %s->%s", have, want));
+      }
       return sb.length() == 0 ? "" : sb.substring(2);
     }
 
@@ -341,6 +374,7 @@ public final class Plan {
     List<DiskShrink> shrinks = new ArrayList<>();
     sizeDrift(s, d, toGrow, shrinks);
     notes.addAll(unknownDiskNotes(s, d));
+    networkNote(s, d).ifPresent(notes::add);
     return new Update(
         s, d, toAttach, List.copyOf(toGrow), List.copyOf(shrinks), List.copyOf(notes));
   }
@@ -385,6 +419,23 @@ public final class Plan {
     if (actual < wantedGiB)
       grow.add(new DiskGrow(label, disk.target(), disk.path(), actual, wantedGiB));
     else if (actual > wantedGiB) shrink.add(new DiskShrink(label, actual, wantedGiB));
+  }
+
+  /**
+   * A VM attached to another network than the inventory names. Not acted on: the guest's address
+   * was written by cloud-init for the network it was created on, and moving the interface would
+   * leave it with an address nobody routes.
+   */
+  private static Optional<String> networkNote(Server s, DomainState d) {
+    return d.primaryNic()
+        .map(DomainState.Nic::network)
+        .filter(have -> !have.equals(s.getNetwork()))
+        .map(
+            have ->
+                String.format(
+                    "network '%s' on the host, '%s' in the inventory - not moved (the guest's"
+                        + " address is set at creation); recreate the VM to move it",
+                    have, s.getNetwork()));
   }
 
   private static List<DiskAttach> diskAttachments(Server s, DomainState d, List<String> notes) {

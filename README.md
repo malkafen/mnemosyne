@@ -20,6 +20,11 @@ difference and applies it.
 - **Reconciles vCPU, RAM, power state and autostart** of existing VMs on every run.
 - **Manages data disks, add-only.** `extraDisks` are created, attached and grown, but never
   detached, shrunk or deleted while the VM exists — see [disks](docs/disks.md).
+- **Creates networks and firewalls.** `networks` declares libvirt networks (NAT, routed, isolated,
+  or the host's LAN bridge) and `firewalls` named rule sets that one or many VMs reference with
+  `firewall:`. The rules are libvirt nwfilters on the hypervisor, out of the guest's reach, and a
+  change applies live — a sandbox for an agent is a dozen lines, see
+  [networks and firewalls](docs/networks.md).
 - **Remembers unfinished work.** A VM whose cloud-init never finished stays `pending` instead of
   quietly becoming "no changes" ([initialization](docs/cloud-init.md#initialization-marker)).
 
@@ -107,6 +112,7 @@ A plan looks like this ([more output examples](docs/output.md)):
 | [How it works](docs/how-it-works.md) | Architecture, the run step by step, state model, plan, preflight, `--join`, parallelism |
 | [Cloud-init](docs/cloud-init.md) | Seed delivery, which template fields are filled from the inventory, `phone_home`, the `<mnem:init>` marker |
 | [Configuration](docs/configuration.md) | Inventory format, command-line flags, exit codes, templates |
+| [Networks and firewalls](docs/networks.md) | Declared libvirt networks, per-VM firewalls (nwfilter), DHCP reservations, recipes for sandboxing |
 | [Disks](docs/disks.md) | Root and extra disks: naming, attach, grow, what is never done, deletion |
 | [Output](docs/output.md) | Plan, Applied, Settled blocks and what every marker means |
 | [CHANGELOG](CHANGELOG.md) | What changed between versions |

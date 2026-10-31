@@ -70,6 +70,9 @@ are git-ignored.
 | `launch` | server | `true` | Desired power state. A new VM boots once regardless, for cloud-init. |
 | `autostart` | server | untouched | libvirt autostart; omitted, the domain's own setting is left alone. |
 | `extraDisks` | server | none | Up to 24 blank disks, see [disks](disks.md). |
+| `networks` | group | none | libvirt networks to create on this hypervisor, keyed by name; see [networks](networks.md#networks). A server's `network` may name one. |
+| `firewalls` | group | none | Named firewalls, keyed by name; see [firewalls](networks.md#firewalls). |
+| `firewall` | group / server | none | The firewall applied to the VM's interface; `none` on a server opts out of the group's. Changing it applies live. |
 
 `ip`, `gateway`, `name` in `user-data` and everything else rendered into cloud-init only matters on
 the first boot: changing them later does not reconfigure an existing guest.

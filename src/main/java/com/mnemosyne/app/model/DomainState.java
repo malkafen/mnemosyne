@@ -1,6 +1,7 @@
 package com.mnemosyne.app.model;
 
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 /**
@@ -34,7 +35,81 @@ public record DomainState(
     boolean autostart,
     List<String> detachedOwned,
     List<String> reusedPaths,
-    InitMarker init) {
+    InitMarker init,
+    List<Nic> nics) {
+
+  /**
+   * One network interface of the domain: the libvirt network it is attached to (null for anything
+   * but a {@code type='network'} interface), and the nwfilter on it with its parameters (null and
+   * empty when it has none).
+   */
+  public record Nic(String network, String filter, Map<String, String> params, String mac) {
+    public Nic {
+      params = params == null ? Map.of() : Map.copyOf(params);
+    }
+
+    /** An interface whose MAC is of no interest. */
+    public Nic(String network, String filter, Map<String, String> params) {
+      this(network, filter, params, null);
+    }
+  }
+
+  public DomainState {
+    nics = nics == null ? List.of() : List.copyOf(nics);
+  }
+
+  /** A snapshot with no interfaces read. */
+  public DomainState(
+      String name,
+      int cpu,
+      long ram,
+      String serverId,
+      String specVersion,
+      String managedBy,
+      List<Disk> disks,
+      boolean active,
+      boolean autostart,
+      List<String> detachedOwned,
+      List<String> reusedPaths,
+      InitMarker init) {
+    this(
+        name,
+        cpu,
+        ram,
+        serverId,
+        specVersion,
+        managedBy,
+        disks,
+        active,
+        autostart,
+        detachedOwned,
+        reusedPaths,
+        init,
+        List.of());
+  }
+
+  /** The interface Mnemosyne wires up: the first one. */
+  public Optional<Nic> primaryNic() {
+    return nics.isEmpty() ? Optional.empty() : Optional.of(nics.get(0));
+  }
+
+  /** The same snapshot carrying these interfaces. */
+  public DomainState withNics(List<Nic> nics) {
+    return new DomainState(
+        name,
+        cpu,
+        ram,
+        serverId,
+        specVersion,
+        managedBy,
+        disks,
+        active,
+        autostart,
+        detachedOwned,
+        reusedPaths,
+        init,
+        nics);
+  }
 
   /** A snapshot whose initialization is not in question. */
   public DomainState(
@@ -225,7 +300,8 @@ public record DomainState(
         autostart,
         detachedOwned,
         reusedPaths,
-        init);
+        init,
+        nics);
   }
 
   /** The same snapshot carrying a different disk list, used to attach the capacities. */
@@ -242,6 +318,7 @@ public record DomainState(
         autostart,
         detachedOwned,
         reusedPaths,
-        init);
+        init,
+        nics);
   }
 }

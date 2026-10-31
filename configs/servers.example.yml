@@ -139,3 +139,66 @@
   port: 22
   key: "/home/virtops/.ssh/id_ed25519"
   servers:
+
+# ----- Group 4: a sandbox — its own network, and a firewall on the VMs ---------
+# `networks` creates libvirt networks on the hypervisor; `firewalls` declares named
+# rule sets a server applies with `firewall:` (or the whole group, as here). The
+# rules are a libvirt nwfilter on the hypervisor: nothing inside the guest can turn
+# them off, and editing them applies live to every running VM that uses them.
+# Everything about both is in docs/networks.md.
+- group: "hv04.example.lan"
+  host: "192.0.2.40"
+  user: "virtops"
+  port: 22
+  key: "/home/virtops/.ssh/id_ed25519"
+  volLookup: "debian-13-genericcloud-amd64.qcow2"
+  metaUrl: "http://192.0.2.5:8080/cloud-init/"
+
+  networks:
+    sandbox:                         # libvirt network name
+      mode: nat                      # nat | route | isolated | bridge (default nat)
+      address: 10.77.0.1/24          # host address on the bridge = the guests' gateway
+      # bridge: virbr-sandbox        # optional (required for mode: bridge, e.g. br0)
+      # dhcp: 10.77.0.100-10.77.0.199  # optional pool for VMs Mnemosyne did not create;
+      #                                # its own VMs get their `ip` reserved automatically
+      # autostart: true
+
+  firewalls:
+    agent:                           # nwfilter 'mnem-agent'
+      default: drop                  # drop (allow-list, default) | accept (deny-list)
+      # antiSpoofing: true           # VM may send only from its own MAC and `ip`
+      # allowSeed: true              # VM may always reach its cloud-init seed (metaUrl)
+      # allowDhcp: true              # VM may get its first-boot lease
+      rules:                         # first match wins; replies are allowed automatically
+        - action: accept             # accept | drop | reject
+          direction: in              # in = to the VM, out = from the VM
+          protocol: tcp              # tcp | udp | icmp | all (default all)
+          remote: 10.77.0.1          # the other end: address or CIDR, one or a list
+          ports: 22                  # destination port(s): 22, [80, 443], "8000-8100"
+          comment: ssh from the hypervisor only
+        - action: accept
+          direction: out
+          protocol: udp
+          remote: [8.8.8.8, 1.1.1.1]
+          ports: 53
+        - action: accept
+          direction: out
+          protocol: tcp
+          remote: 10.0.0.5           # the one internal service the VMs may use
+          ports: [22, 443]
+
+  firewall: agent                    # every server below, unless it says otherwise
+
+  servers:
+    agent-01:
+      cpu: 2
+      ram: 4096
+      ip: 10.77.0.10/24              # must be inside the network; gateway defaults to 10.77.0.1
+      network: sandbox
+    tools-01:
+      cpu: 2
+      ram: 2048
+      ip: 10.77.0.20/24
+      network: sandbox
+      firewall: none                 # opt out of the group's firewall
+
