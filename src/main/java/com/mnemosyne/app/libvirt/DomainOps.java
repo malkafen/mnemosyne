@@ -143,6 +143,33 @@ class DomainOps {
     }
   }
 
+  boolean updateInterfaceNetwork(String name, String network, boolean live)
+      throws LibvirtException {
+    Domain d = connect.domainLookupByName(name);
+    try {
+      String config = XmlUtil.interfaceWithNetwork(d.getXMLDesc(Domain.XMLFlags.INACTIVE), network);
+      log.trace("Interface XML for domain '{}': {}", name, config);
+      d.updateDeviceFlags(config, Domain.DeviceModifyFlags.CONFIG);
+      log.debug(
+          "Domain '{}': interface moved to network '{}' in the persistent config", name, network);
+
+      if (!live) return false;
+      try {
+        d.updateDeviceFlags(config, Domain.DeviceModifyFlags.LIVE);
+        log.debug("Domain '{}': interface moved to network '{}' live", name, network);
+        return true;
+      } catch (LibvirtException e) {
+        log.debug("Domain '{}': live network change failed, applies after restart", name, e);
+        return false;
+      }
+    } catch (LibvirtException e) {
+      log.debug("Failed to move the interface of domain '{}' to network '{}'", name, network, e);
+      throw e;
+    } finally {
+      freeDomainQuietly(d);
+    }
+  }
+
   Set<String> usedDiskTargets(String name) throws LibvirtException {
     Domain d = connect.domainLookupByName(name);
     try {

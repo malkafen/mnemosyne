@@ -13,6 +13,7 @@ import com.mnemosyne.app.model.Preflight;
 import com.mnemosyne.app.model.Server;
 import com.mnemosyne.app.output.Report;
 import com.mnemosyne.app.utils.TargetDev;
+import com.mnemosyne.app.utils.XmlUtil;
 import java.io.IOException;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -42,6 +43,7 @@ public class Harmonia implements AutoCloseable {
   private final DomainOps domainOps;
   private final StorageOps storageOps;
   private final NetworkOps networkOps;
+  private final GuestOps guestOps;
   private final Connect connect;
   private final String group;
   private Plan plan;
@@ -65,9 +67,14 @@ public class Harmonia implements AutoCloseable {
   }
 
   Harmonia(String group, Connect connect) {
+    this(group, connect, new GuestOps(connect));
+  }
+
+  Harmonia(String group, Connect connect, GuestOps guestOps) {
     this.domainOps = new DomainOps(connect);
     this.storageOps = new StorageOps(connect);
     this.networkOps = new NetworkOps(connect);
+    this.guestOps = guestOps;
     this.connect = connect;
     this.group = group;
   }
@@ -120,9 +127,13 @@ public class Harmonia implements AutoCloseable {
     List<Server> creating = List.copyOf(this.plan.getToCreate().values());
     List<Plan.Update> attaching =
         this.plan.getToUpdate().values().stream().filter(Plan.Update::disksChanged).toList();
+    List<Plan.Update> rewiring =
+        this.plan.getToUpdate().values().stream().filter(Plan.Update::networkChanged).toList();
+    List<Plan.Update> readdressing =
+        this.plan.getToUpdate().values().stream().filter(Plan.Update::addressChanged).toList();
 
-    if (creating.isEmpty() && attaching.isEmpty()) {
-      log.debug("[ {} ] nothing to check (no VM to create, no disk to attach)", group);
+    if (creating.isEmpty() && attaching.isEmpty() && rewiring.isEmpty() && readdressing.isEmpty()) {
+      log.debug("[ {} ] nothing to check (nothing to create, attach or rewire)", group);
       return preflight;
     }
 
@@ -144,6 +155,19 @@ public class Harmonia implements AutoCloseable {
           .add(s);
       byNetwork.computeIfAbsent(s.getNetwork(), k -> new ArrayList<>()).add(s);
       preflight.checkTemplates(s);
+    }
+    for (Plan.Update u : rewiring)
+      byNetwork.computeIfAbsent(u.server().getNetwork(), k -> new ArrayList<>()).add(u.server());
+    for (Plan.Update u : readdressing) {
+      preflight.checkTemplates(u.server());
+      if (!u.actual().guestAgent())
+        preflight.add(
+            new Preflight.Problem(
+                "domain '" + u.server().getId() + "'",
+                "has no qemu-guest-agent channel ("
+                    + XmlUtil.GUEST_AGENT_CHANNEL
+                    + "), so ip and gateway cannot be changed in the guest"),
+            u.server().getId());
     }
 
     Map<String, String> poolPaths = new LinkedHashMap<>();
@@ -236,7 +260,7 @@ public class Harmonia implements AutoCloseable {
 
   private void joinOne(Server s, Report report) {
     String metadata =
-        s.buildMnemosyneMetadataXml(List.of(), List.of(), InitMarker.adopted(Instant.now()));
+        s.buildMnemosyneMetadataXml(List.of(), List.of(), InitMarker.adopted(Instant.now()), null);
     if (domainOps.joinDomain(s.getName(), metadata)) report.add("join", "+", s.getId(), "");
     else {
       log.debug("[ {} ] join failed for '{}'", group, s.getId());
@@ -350,24 +374,90 @@ public class Harmonia implements AutoCloseable {
     Server s = u.server();
     String name = u.actual().name();
     try {
-      List<String> diskLines = new ArrayList<>(attachDisks(u));
-      diskLines.addAll(growDisks(u));
+      List<String> owned = new ArrayList<>(u.actual().ownedPaths());
+      owned.addAll(u.actual().detachedOwned());
+      List<String> reused = new ArrayList<>(u.actual().reusedPaths());
+      List<String> lines = new ArrayList<>(attachDisks(u, owned, reused));
+      lines.addAll(growDisks(u));
       if (u.cpuChanged()) domainOps.updateCpu(name, s.getCpu());
       if (u.ramChanged()) domainOps.updateRam(name, s.getRam());
       if (u.autostartChanged()) domainOps.updateAutostart(name, s.getAutostart());
+      boolean nicPending = u.networkChanged() && rewire(u, lines);
+      boolean addressFirst =
+          u.addressChanged() && u.actual().active() && !s.isLaunch() && !nicPending;
+      Exception addressFailure = null;
+      if (addressFirst) addressFailure = tryReaddress(u, owned, reused, true, lines);
       if (u.powerChanged()) {
         if (s.isLaunch()) domainOps.startDomain(name);
         else domainOps.shutdownDomain(name);
       }
-      report.add("update", "~", s.getId(), u.diff() + restartNote(u));
-      report.sub(diskLines);
+      if (u.addressChanged() && !addressFirst) {
+        if (nicPending && s.isLaunch())
+          addressFailure =
+              new IllegalStateException(
+                  String.format(
+                      "ip/gateway not applied: the interface reaches network '%s' only after a"
+                          + " power cycle - power-cycle the VM and run again",
+                      s.getNetwork()));
+        else addressFailure = tryReaddress(u, owned, reused, s.isLaunch(), lines);
+      }
+      if (addressFailure != null) {
+        log.debug("[ {} ] guest network failed for '{}'", group, s.getId(), addressFailure);
+        report.skip(s.getId(), "update incomplete: " + cause(addressFailure));
+      } else report.add("update", "~", s.getId(), u.diff() + restartNote(u));
+      report.sub(lines);
     } catch (LibvirtException | RuntimeException e) {
       log.debug("[ {} ] update failed for '{}'", group, s.getId(), e);
       report.skip(s.getId(), "update failed: " + cause(e));
     }
   }
 
-  private List<String> attachDisks(Plan.Update u) throws LibvirtException {
+  private boolean rewire(Plan.Update u, List<String> lines) throws LibvirtException {
+    String network = u.server().getNetwork();
+    boolean live = u.actual().active();
+    boolean applied = domainOps.updateInterfaceNetwork(u.actual().name(), network, live);
+    if (!live || applied) return false;
+    if (u.server().isLaunch())
+      lines.add(String.format("network '%s' applies after power cycle", network));
+    return true;
+  }
+
+  private Exception tryReaddress(
+      Plan.Update u, List<String> owned, List<String> reused, boolean running, List<String> lines) {
+    try {
+      lines.addAll(readdress(u, owned, reused, running));
+      return null;
+    } catch (LibvirtException | RuntimeException e) {
+      return e;
+    }
+  }
+
+  private List<String> readdress(
+      Plan.Update u, List<String> owned, List<String> reused, boolean running)
+      throws LibvirtException {
+    Server s = u.server();
+    String name = u.actual().name();
+    if (!running) domainOps.startDomain(name);
+    try {
+      guestOps.applyNetplan(name, s.buildNetplanYaml());
+    } catch (LibvirtException | RuntimeException e) {
+      if (!running) {
+        try {
+          domainOps.shutdownDomain(name);
+        } catch (LibvirtException | RuntimeException x) {
+          e.addSuppressed(x);
+        }
+      }
+      throw e;
+    }
+    if (!running) domainOps.shutdownDomain(name);
+    domainOps.writeMetadata(
+        name, s.buildMnemosyneMetadataXml(owned, reused, u.actual().init(), s.guestNetwork()));
+    return running ? List.of() : List.of("started to apply the guest network, shut down again");
+  }
+
+  private List<String> attachDisks(Plan.Update u, List<String> owned, List<String> reused)
+      throws LibvirtException {
     if (!u.disksChanged()) return List.of();
 
     Server s = u.server();
@@ -384,9 +474,6 @@ public class Harmonia implements AutoCloseable {
         TargetDev.prefix(u.actual().disks().isEmpty() ? null : u.actual().disks().get(0).target());
 
     List<String> lines = new ArrayList<>();
-    List<String> owned = new ArrayList<>(u.actual().ownedPaths());
-    owned.addAll(u.actual().detachedOwned());
-    List<String> reused = new ArrayList<>(u.actual().reusedPaths());
     for (Plan.DiskAttach attach : u.toAttach()) {
       ExtraDisk disk = attach.disk();
       List<String> free = TargetDev.allocate(prefix, used, 1);
@@ -406,7 +493,9 @@ public class Harmonia implements AutoCloseable {
       if (!owned.contains(volume.path()) && !reused.contains(volume.path())) {
         (volume.reused() ? reused : owned).add(volume.path());
         domainOps.writeMetadata(
-            name, s.buildMnemosyneMetadataXml(owned, reused, u.actual().init()));
+            name,
+            s.buildMnemosyneMetadataXml(
+                owned, reused, u.actual().init(), u.actual().guestNetwork()));
       }
 
       boolean hotPlugged =
@@ -502,7 +591,7 @@ public class Harmonia implements AutoCloseable {
       domainOps.writeMetadata(
           s.getName(),
           s.buildMnemosyneMetadataXml(
-              s.ownedPaths(), List.copyOf(s.getReusedVolPaths()), finished));
+              s.ownedPaths(), List.copyOf(s.getReusedVolPaths()), finished, s.guestNetwork()));
       s.setInit(finished);
     }
   }

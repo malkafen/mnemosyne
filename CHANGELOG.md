@@ -6,7 +6,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Upgrading from 0.4.0
+- **`network`, `ip` and `gateway` are reconciled.** Until now they were used at creation only. The
+  first plan after the upgrade compares `network:` with the libvirt network of every managed VM's
+  first interface, adopted ones included, and lists a VM whose interface is on another network as
+  an update. Check the plan before applying.
+- **VMs created before this version are not re-addressed.** The address a VM was configured with
+  is recorded in its metadata at creation (`<mnem:network ip=… gateway=…/>`); a VM without that
+  record, created by an earlier version or adopted with `--join`, keeps whatever its guest has and
+  the plan notes it on every run (`i … ip and gateway were never recorded`), so a group of such VMs
+  no longer prints `no changes`; notes do not change the exit code. Recreate such a VM to bring
+  its address under Mnemosyne.
+- **A VM whose first interface is not `type='network'`** (a plain bridge, `direct`) keeps it:
+  `network` is not reconciled for it.
+
 ### Added
+- Network changes reach the guest. A new `ip` or `gateway` is rendered from `network-config.yml`
+  into `/etc/netplan/50-cloud-init.yaml` inside the guest through the qemu-guest-agent, validated
+  with `netplan generate` and applied with `netplan apply`; the plan shows
+  `ip 192.0.2.40/24->192.0.2.41/24` and `gateway …->…`. A VM that must stay off is started for the
+  change and shut down again. The recorded address is updated only once the guest has applied it,
+  so a failed attempt is reported as skipped and retried by the next run. Preflight refuses the
+  change for a domain without the guest agent channel. cloud-init's own network rendering is
+  turned off in the guest, so it cannot overwrite the new file later. The guest needs `qemu-guest-agent` and netplan,
+  as the shipped templates and Debian/Ubuntu cloud images have.
+- A new `network` moves the VM's first interface to that libvirt network, in the persistent config
+  and live; the plan shows `network lan->dmz`, and preflight checks the new network exists and is
+  running.
 - A group may hold no VMs: `servers` can be left out or written empty, where an inventory used to
   be refused with "Server list must not be empty". The group still describes the connection, and
   the run brings that hypervisor down to zero managed domains. Until now the only way to empty a
@@ -21,6 +47,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `--key` / `MNEM_KEY`: the SSH key of every group without a `key` of its own.
 - `--http-port` / `MNEM_HTTP_PORT`: the seed server's port, until now fixed at 8080.
 - `compose.yml` and `.env.example` for running with Docker Compose; `.env` is git-ignored.
+
+### Changed
+- Comments were removed from the Java sources.
 
 ### Security
 - Inventory fields could run a local command: `user` and `host` went into the libvirt URI

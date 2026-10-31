@@ -62,17 +62,53 @@ are git-ignored.
 | `name` | server | the map key | Domain, volume and host name. Can be changed without recreating the VM. Must be an RFC 1123 host name (letters, digits, `-`, `.`); so must the map key. |
 | `cpu` | server | required | 1-128. Reconciled on every run, applied on the next boot. |
 | `ram` | server | required | MiB, 256-1048576. Same as `cpu`. |
-| `ip` | server | required | CIDR. Written into `network-config` at creation only. |
+| `ip` | server | required | CIDR. Written into `network-config` at creation and into the guest's netplan when it changes, see [changing the network](#changing-the-network-of-an-existing-vm). |
 | `gateway` | server | none | Plain IPv4. Same as `ip`. |
 | `disk` | server | `30` | Root disk in GiB, at least 10. Raising it [grows the disk](disks.md#growing-a-disk); lowering it blocks the run. |
 | `pool` | server | `default` | Storage pool of the root disk. |
-| `network` | server | `default` | libvirt network the first `<interface>` is attached to. |
+| `network` | server | `default` | libvirt network the first `<interface>` is attached to. Changing it moves the interface, live and in the config. |
 | `launch` | server | `true` | Desired power state. A new VM boots once regardless, for cloud-init. |
 | `autostart` | server | untouched | libvirt autostart; omitted, the domain's own setting is left alone. |
 | `extraDisks` | server | none | Up to 24 blank disks, see [disks](disks.md). |
 
-`ip`, `gateway`, `name` in `user-data` and everything else rendered into cloud-init only matters on
-the first boot: changing them later does not reconfigure an existing guest.
+`name` in `user-data` and everything else rendered into cloud-init only matters on the first
+boot: changing it later does not reconfigure an existing guest. `ip`, `gateway` and `network` are
+the exception, below.
+
+### Changing the network of an existing VM
+
+```
+--- Plan ---------------------------------------------
+[ hv01.example.lan ]  update: 1
+  ~ web-01.example.lan  (network lan->dmz, ip 192.0.2.40/24->198.51.100.40/24, gateway 192.0.2.1->198.51.100.1)
+```
+
+- **`network`** is compared with the libvirt network of the domain's first `<interface
+  type='network'>`. A change is written to the persistent config with `updateDeviceFlags` and, on a
+  running VM, live as well; if the live change is refused the report says it applies after a power
+  cycle. Preflight checks the new network the way it checks one for a new VM. Only an interface of
+  `type='network'` is moved: a VM whose first interface is a plain bridge or `direct` keeps it.
+- **`ip` and `gateway`** are compared with the address the VM was configured with, which Mnemosyne
+  records in the domain's metadata as `<mnem:network ip=… gateway=…/>` at creation. A change is
+  rendered from the VM's `network-config.yml` template into a netplan file and handed to the guest
+  through the qemu-guest-agent (`guest-exec`), which validates it with `netplan generate`, replaces
+  `/etc/netplan/50-cloud-init.yaml` and runs `netplan apply`. Only then is the record updated, so a
+  failure leaves the old record, the VM is reported as skipped and the next run tries again. The
+  interface is moved first, then the guest is re-addressed; if a running VM's interface cannot be
+  moved live, its address is left alone — it would be set on the old network — until the VM has
+  been power-cycled and the run repeated. The guest is also given
+  `/etc/cloud/cloud.cfg.d/99-mnemosyne-network.cfg` (`network: {config: disabled}`), so cloud-init
+  never renders its network again over the file Mnemosyne wrote.
+- A VM that is running and stays running is changed in place. One being stopped by the same run is
+  changed before its shutdown, and shut down even if the change fails; one that is off and stays
+  off is started for the change and shut down again.
+- The guest needs `qemu-guest-agent` (the shipped `user-data.yml` installs it, the shipped
+  `server.xml` has its channel) and netplan (Debian and Ubuntu cloud images). A domain without the
+  `org.qemu.guest_agent.0` channel is refused by preflight. The agent is waited for up to 3
+  minutes; a guest whose agent never answers is reported as skipped and the run exits `1`.
+- A VM without the record — created by an earlier version or adopted with `--join` — is never
+  re-addressed, since what its guest has is unknown; the plan notes it on every run, so such a
+  group no longer reads `no changes`. Its `network` is still reconciled.
 
 When running in Docker, `key` and template paths are paths **inside the container**.
 
@@ -187,3 +223,6 @@ run it with `--network host` so the guests can reach port 8080.
 **Each hypervisor:** libvirt with KVM/QEMU reachable over SSH as `user`, a running storage pool
 holding the base cloud image named by `volLookup`, and a running libvirt network named by
 `network`.
+
+**Each guest**, to have its address changed after creation: `qemu-guest-agent` running and
+netplan installed.

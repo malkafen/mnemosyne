@@ -198,8 +198,12 @@ public class Server {
     return documentToString(doc);
   }
 
+  public GuestNetwork guestNetwork() {
+    return new GuestNetwork(this.ip, this.gateway);
+  }
+
   public String buildMnemosyneMetadataXml(
-      List<String> ownedPaths, List<String> reusedPaths, InitMarker init) {
+      List<String> ownedPaths, List<String> reusedPaths, InitMarker init, GuestNetwork network) {
     StringBuilder disks = new StringBuilder();
     for (String p : ownedPaths) disks.append(String.format("<disk path='%s'/>", p));
     StringBuilder reused = new StringBuilder();
@@ -212,8 +216,13 @@ public class Server {
             + "<disks>%s</disks>"
             + "<reused-disks>%s</reused-disks>"
             + "%s"
+            + "%s"
             + "</mnemosyne>",
-        getId(), disks, reused, init == null ? "" : init.toXml());
+        getId(),
+        disks,
+        reused,
+        init == null ? "" : init.toXml(),
+        network == null ? "" : network.toXml());
   }
 
   private void appendMetadata(Document doc) {
@@ -223,6 +232,14 @@ public class Server {
     meta.appendChild(
         pathList(doc, ns, "mnem:reused-disks", "mnem:volume", List.copyOf(reusedVolPaths)));
     meta.appendChild(initElement(doc, ns));
+    if (this.ip != null) meta.appendChild(networkElement(doc, ns));
+  }
+
+  private Element networkElement(Document doc, String ns) {
+    Element element = doc.createElementNS(ns, "mnem:network");
+    element.setAttribute("ip", this.ip);
+    if (this.gateway != null) element.setAttribute("gateway", this.gateway);
+    return element;
   }
 
   private Element initElement(Document doc, String ns) {
@@ -457,17 +474,35 @@ public class Server {
   }
 
   public String buildNetworkConfigYaml() {
-    String tmpl = this.templates.getNetworkConfigTmpl();
     try {
-      Map<String, Object> yaml = loadYamlTemplate(tmpl);
-      Map<String, Object> ethernets = requireMap(yaml, "ethernets", tmpl);
-      Map<String, Object> vif0 = requireMap(ethernets, "vif0", tmpl);
-      vif0.put("addresses", List.of(this.ip));
-      vif0.put("gateway4", this.gateway);
-      return yamlMapper().writeValueAsString(yaml);
+      return yamlMapper().writeValueAsString(networkConfig());
     } catch (IOException e) {
       throw new TemplateException("Failed to build network-config YAML for '" + getName() + "'", e);
     }
+  }
+
+  public String buildNetplanYaml() {
+    try {
+      Map<String, Object> yaml = networkConfig();
+      Map<String, Object> vif0 = vif0(yaml, this.templates.getNetworkConfigTmpl());
+      if (this.gateway == null) vif0.remove("gateway4");
+      return yamlMapper().writeValueAsString(Map.of("network", yaml));
+    } catch (IOException e) {
+      throw new TemplateException("Failed to build netplan YAML for '" + getName() + "'", e);
+    }
+  }
+
+  private Map<String, Object> networkConfig() throws IOException {
+    String tmpl = this.templates.getNetworkConfigTmpl();
+    Map<String, Object> yaml = loadYamlTemplate(tmpl);
+    Map<String, Object> vif0 = vif0(yaml, tmpl);
+    vif0.put("addresses", List.of(this.ip));
+    vif0.put("gateway4", this.gateway);
+    return yaml;
+  }
+
+  private Map<String, Object> vif0(Map<String, Object> yaml, String tmpl) {
+    return requireMap(requireMap(yaml, "ethernets", tmpl), "vif0", tmpl);
   }
 
   @SuppressWarnings("unchecked")

@@ -18,6 +18,9 @@ difference and applies it.
   guest's `phone_home`. What is rendered from where, and how completion is recorded, is in
   [cloud-init](docs/cloud-init.md).
 - **Reconciles vCPU, RAM, power state and autostart** of existing VMs on every run.
+- **Reconciles the network.** A new `network` moves the VM's interface to that libvirt network; a
+  new `ip` or `gateway` is written into the guest's netplan through the qemu-guest-agent and applied
+  in place — see [guest network](docs/configuration.md#changing-the-network-of-an-existing-vm).
 - **Manages data disks, add-only.** `extraDisks` are created, attached and grown, but never
   detached, shrunk or deleted while the VM exists — see [disks](docs/disks.md).
 - **Remembers unfinished work.** A VM whose cloud-init never finished stays `pending` instead of

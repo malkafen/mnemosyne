@@ -15,7 +15,41 @@ public record DomainState(
     boolean autostart,
     List<String> detachedOwned,
     List<String> reusedPaths,
-    InitMarker init) {
+    InitMarker init,
+    String interfaceNetwork,
+    GuestNetwork guestNetwork,
+    boolean guestAgent) {
+
+  public DomainState(
+      String name,
+      int cpu,
+      long ram,
+      String serverId,
+      String specVersion,
+      String managedBy,
+      List<Disk> disks,
+      boolean active,
+      boolean autostart,
+      List<String> detachedOwned,
+      List<String> reusedPaths,
+      InitMarker init) {
+    this(
+        name,
+        cpu,
+        ram,
+        serverId,
+        specVersion,
+        managedBy,
+        disks,
+        active,
+        autostart,
+        detachedOwned,
+        reusedPaths,
+        init,
+        null,
+        GuestNetwork.ASSUMED_CURRENT,
+        true);
+  }
 
   public DomainState(
       String name,
@@ -158,7 +192,34 @@ public record DomainState(
         autostart,
         detachedOwned,
         reusedPaths,
-        init);
+        init,
+        interfaceNetwork,
+        guestNetwork,
+        guestAgent);
+  }
+
+  public DomainState withNetwork(String interfaceNetwork, GuestNetwork guestNetwork) {
+    return withNetwork(interfaceNetwork, guestNetwork, guestAgent);
+  }
+
+  public DomainState withNetwork(
+      String interfaceNetwork, GuestNetwork guestNetwork, boolean guestAgent) {
+    return new DomainState(
+        name,
+        cpu,
+        ram,
+        serverId,
+        specVersion,
+        managedBy,
+        disks,
+        active,
+        autostart,
+        detachedOwned,
+        reusedPaths,
+        init,
+        interfaceNetwork,
+        guestNetwork,
+        guestAgent);
   }
 
   public DomainState withDisks(List<Disk> disks) {
@@ -174,6 +235,9 @@ public record DomainState(
         autostart,
         detachedOwned,
         reusedPaths,
-        init);
+        init,
+        interfaceNetwork,
+        guestNetwork,
+        guestAgent);
   }
 }

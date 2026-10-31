@@ -53,6 +53,15 @@ public final class Plan {
       return server.getAutostart() != null && server.getAutostart() != actual.autostart();
     }
 
+    public boolean networkChanged() {
+      return actual.interfaceNetwork() != null
+          && !actual.interfaceNetwork().equals(server.getNetwork());
+    }
+
+    public boolean addressChanged() {
+      return actual.guestNetwork() != null && actual.guestNetwork().differsFrom(server);
+    }
+
     public boolean disksChanged() {
       return !toAttach.isEmpty();
     }
@@ -66,6 +75,8 @@ public final class Plan {
           || ramChanged()
           || autostartChanged()
           || powerChanged()
+          || networkChanged()
+          || addressChanged()
           || disksChanged()
           || growChanged();
     }
@@ -74,6 +85,18 @@ public final class Plan {
       StringBuilder sb = new StringBuilder();
       if (cpuChanged()) sb.append(String.format(", cpu %d->%d", actual.cpu(), server.getCpu()));
       if (ramChanged()) sb.append(String.format(", ram %d->%d", actual.ram(), server.getRam()));
+      if (networkChanged())
+        sb.append(
+            String.format(", network %s->%s", actual.interfaceNetwork(), server.getNetwork()));
+      if (addressChanged()) {
+        GuestNetwork was = actual.guestNetwork();
+        if (!Objects.equals(was.ip(), server.getIp()))
+          sb.append(String.format(", ip %s->%s", was.ip(), server.getIp()));
+        if (!Objects.equals(was.gateway(), server.getGateway()))
+          sb.append(
+              String.format(
+                  ", gateway %s->%s", orNone(was.gateway()), orNone(server.getGateway())));
+      }
       if (autostartChanged())
         sb.append(String.format(", autostart %b->%b", actual.autostart(), server.getAutostart()));
       if (powerChanged())
@@ -86,6 +109,10 @@ public final class Plan {
       for (DiskGrow g : toGrow)
         sb.append(String.format(", grow %s %dG->%dG", g.label(), g.fromGiB(), g.toGiB()));
       return sb.length() == 0 ? "" : sb.substring(2);
+    }
+
+    private static String orNone(String value) {
+      return value == null ? "none" : value;
     }
 
     private static String power(boolean on) {
@@ -238,9 +265,13 @@ public final class Plan {
     List<DiskShrink> shrinks = new ArrayList<>();
     sizeDrift(s, d, toGrow, shrinks);
     notes.addAll(unknownDiskNotes(s, d));
+    if (d.guestNetwork() == null) notes.add(UNRECORDED_NETWORK_NOTE);
     return new Update(
         s, d, toAttach, List.copyOf(toGrow), List.copyOf(shrinks), List.copyOf(notes));
   }
+
+  static final String UNRECORDED_NETWORK_NOTE =
+      "ip and gateway were never recorded on this domain - not reconciled";
 
   private static void sizeDrift(
       Server s, DomainState d, List<DiskGrow> grow, List<DiskShrink> shrink) {

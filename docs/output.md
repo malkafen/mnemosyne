@@ -19,11 +19,12 @@ header with counts, then one line per VM, with indented detail lines below it.
 
 ```
 --- Plan ---------------------------------------------
-[ hv01.example.lan ]  delete: 1, update: 1, create: 1
+[ hv01.example.lan ]  delete: 1, update: 2, create: 1
   - old-test.example.lan
       /var/lib/libvirt/images/old-test.example.lan.qcow2
       /var/lib/libvirt/images/old-test.example.lan-data.qcow2
   ~ cache-01  (cpu 2->4, attach 'data' 40G as vdb)
+  ~ db-01  (ip 192.0.2.41/24->192.0.2.42/24)
   + web-01
       web-01-data.qcow2 40G in pool 'default'
 
@@ -32,10 +33,11 @@ header with counts, then one line per VM, with indented detail lines below it.
 Applying in 10s — Ctrl+C to abort...
 
 --- Applied -------------------------------------------
-[ hv01.example.lan ]  delete: 1, update: 1, create: 1, skipped: 0
+[ hv01.example.lan ]  delete: 1, update: 2, create: 1, skipped: 0
   - old-test.example.lan
   ~ cache-01  (cpu 2->4, attach 'data' 40G as vdb, applies after restart)
       vdb data in pool 'default'
+  ~ db-01  (ip 192.0.2.41/24->192.0.2.42/24)
   + web-01
       data 40G in pool 'default'
 ```

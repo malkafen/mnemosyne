@@ -68,7 +68,8 @@ public class ServerTest {
   void buildMnemosyneMetadataXml_keepsReusedVolumesOutOfMnemDisks() {
     String xml =
         sampleServer(2048)
-            .buildMnemosyneMetadataXml(List.of("/img/a.qcow2"), List.of("/img/b.qcow2"), null);
+            .buildMnemosyneMetadataXml(
+                List.of("/img/a.qcow2"), List.of("/img/b.qcow2"), null, null);
     assertThat(xml)
         .contains("<disks><disk path='/img/a.qcow2'/></disks>")
         .contains("<reused-disks><volume path='/img/b.qcow2'/></reused-disks>")
@@ -115,7 +116,8 @@ public class ServerTest {
             .buildMnemosyneMetadataXml(
                 List.of(),
                 List.of(),
-                new InitMarker("adopted", null, "2026-09-25T10:00:00Z", null));
+                new InitMarker("adopted", null, "2026-09-25T10:00:00Z", null),
+                null);
     assertThat(xml).contains("<init state='adopted' created='2026-09-25T10:00:00Z'/></mnemosyne>");
   }
 }

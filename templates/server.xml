@@ -19,9 +19,12 @@
                                     and reused; kept when the VM is deleted
     <mnem:init>                     added: state='pending' and a random token; set to 'finished'
                                     when the guest's cloud-init phones home
+    <mnem:network>                  added: the ip and gateway the guest is configured with;
+                                    a later change to either is applied inside the guest
     <entry name='serial'>           cloud-init NoCloud datasource URL
     <disk device='disk'>/<source>   @file — path of the cloned volume (first such disk)
-    <interface>/<source>            @network — libvirt network name (first interface)
+    <interface>/<source>            @network — libvirt network name (first interface); a later
+                                    change moves the interface, live and in the config
 
   Added per VM, one per entry in the inventory's `extraDisks`: a copy of the first
   <disk device='disk'> below, with its own <source file>, its own <target dev> and a
@@ -202,7 +205,8 @@
 
     <!--
       QEMU guest agent channel. Lets the host read the guest's IPs and request a clean
-      filesystem-quiesced shutdown. The guest needs the qemu-guest-agent package, which
+      filesystem-quiesced shutdown. Mnemosyne writes a changed ip/gateway into the guest's
+      netplan through it, so remove it and an existing VM can no longer be re-addressed. The guest needs the qemu-guest-agent package, which
       the shipped user-data installs. No <address> is given — libvirt assigns one.
     -->
     <controller type='virtio-serial' index='0'/>
