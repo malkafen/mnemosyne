@@ -16,11 +16,6 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
 
-/**
- * The inventory is the last place a bad disk name can be caught cheaply. Past this point it becomes
- * a volume file name and a {@code <serial>}, and a name udev mangles leaves the administrator
- * without the {@code /dev/disk/by-id} path the whole design rests on.
- */
 @DisplayName("ExtraDisk validation")
 public class ExtraDiskValidationTest {
 
@@ -88,7 +83,6 @@ public class ExtraDiskValidationTest {
 
   @Test
   void twentyCharactersIsStillAllowed() {
-    // 20 is exactly where /dev/disk/by-id truncates for virtio, so it is the last usable length.
     assertThat(violations(server(disk("abcdefghijklmnopqrst", 40)))).isEmpty();
   }
 
@@ -100,28 +94,21 @@ public class ExtraDiskValidationTest {
 
   @Test
   void aDiskWithNoPoolIsRejected() {
-    // The pool is filled in from the server when the inventory is loaded, so a null here means
-    // something built a Server without going through that path.
-    // Arrange
     ExtraDisk d = disk("data", 40);
     d.setPool(null);
-    // Assert
     assertThat(violations(server(d))).contains("extraDisks[0].pool");
   }
 
   @Test
   void twoDisksWithOneNameAreRejected() {
-    // They would resolve to one volume file and one serial, and the second would silently win.
     assertThat(violations(server(disk("data", 40), disk("data", 50))))
         .contains("extraDiskNamesUnique");
   }
 
   @Test
   void moreDisksThanTargetNamesAreRejected() {
-    // Arrange: 25 disks, one past the cap
     List<ExtraDisk> many = new ArrayList<>();
     for (int i = 0; i < 25; i++) many.add(disk("data-" + i, 10));
-    // Assert
     assertThat(violations(server(many.toArray(new ExtraDisk[0])))).contains("extraDisks");
   }
 }

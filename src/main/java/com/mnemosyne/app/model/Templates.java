@@ -26,7 +26,6 @@ public class Templates {
   @NotBlank(message = "networkConfigTmpl must not be blank")
   private String networkConfigTmpl;
 
-  /** Every template file a server is rendered from, in the order the builders read them. */
   public List<String> paths() {
     return Stream.of(serverTmpl, volTmpl, metaDataTmpl, userDataTmpl, networkConfigTmpl)
         .filter(Objects::nonNull)

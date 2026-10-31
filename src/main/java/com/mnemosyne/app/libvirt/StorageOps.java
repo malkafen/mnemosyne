@@ -31,41 +31,19 @@ class StorageOps {
       targetCapacity = targetCapacity * GIB;
     }
 
-    /**
-     * A volume with nothing to clone from. The volume XML already states the capacity, so a blank
-     * volume is created at its final size and needs no resize — and therefore has no resize to roll
-     * back.
-     */
     static VolumeSpec blank(String volumeName, String poolName, String volXml) {
       return new VolumeSpec(volumeName, poolName, volXml, null, 0);
     }
   }
 
-  /**
-   * A provisioned volume, and whether it was already in the pool.
-   *
-   * <p>The distinction only matters for reporting, and only for data disks: a reused root disk is a
-   * retried creation, but a reused data disk may be the previous life of a VM with the same name,
-   * and it arrives in the guest with its old contents. Mnemosyne keeps it — deleting a volume to
-   * make a clean one is the one mistake that cannot be undone — and says so.
-   */
   record Provisioned(String path, boolean reused) {}
 
-  /** A pool that can be used, and the directory its file-backed volumes live in. */
   record PoolCheck(Optional<Problem> problem, String targetPath) {
     static PoolCheck broken(Problem problem) {
       return new PoolCheck(Optional.of(problem), null);
     }
   }
 
-  /**
-   * Read-only check that a pool can hold a new volume: it exists and it is running. No base image
-   * is looked up, because a blank data disk is not cloned from one.
-   *
-   * <p>The pool's {@code <target><path>} comes back with it. Preflight needs it to tell whether a
-   * volume name it is about to use is already attached to another domain, and comparing full paths
-   * is what keeps two pools that happen to hold a same-named volume apart.
-   */
   PoolCheck checkPool(String poolName) {
     StoragePool pool;
     try {
@@ -88,11 +66,6 @@ class StorageOps {
     }
   }
 
-  /**
-   * The pool's target directory, or null when it has none or cannot be read. Null is not an error
-   * here: a pool without a local path (iscsi, rbd) simply cannot be checked for path collisions,
-   * and the checks that use it skip what they cannot see rather than guessing.
-   */
   private String poolTargetPath(StoragePool pool, String poolName) {
     try {
       String path = XmlUtil.poolTargetPath(pool.getXMLDesc(0));
@@ -104,11 +77,6 @@ class StorageOps {
     }
   }
 
-  /**
-   * Read-only check that a clone could be made at all: the pool exists, it is running, and it holds
-   * the base image. The happy path pays for no refresh; it is spent only when the image is missing
-   * from libvirt's cache, which is exactly the case where a stale cache would be a false alarm.
-   */
   Optional<Problem> checkBaseImage(String poolName, String volName) {
     StoragePool pool;
     try {
@@ -177,13 +145,6 @@ class StorageOps {
     }
   }
 
-  /**
-   * Clones the root volume from the base image, or hands back the one that is already there.
-   *
-   * <p>An existing volume is reused, never replaced, and reported as reused: it may be the leftover
-   * of a creation that was interrupted, or a disk somebody put there, and Mnemosyne cannot tell the
-   * two apart. The caller records it as not its own.
-   */
   Provisioned provisionVolume(VolumeSpec spec) throws LibvirtException {
     log.debug(
         "Provisioning volume for domain '{}' in storage pool '{}'",
@@ -202,14 +163,6 @@ class StorageOps {
     }
   }
 
-  /**
-   * Creates one blank volume, or hands back the one that is already there.
-   *
-   * <p>Nothing is cloned and nothing is resized: the volume XML carries the capacity, so libvirt
-   * makes it the right size in one call. An existing volume of that name is reused rather than
-   * replaced — it is the only safe answer, since Mnemosyne cannot know whether it holds data
-   * somebody wants — and the caller reports which of the two happened.
-   */
   Provisioned provisionBlankVolume(VolumeSpec spec) throws LibvirtException {
     log.debug(
         "Provisioning blank volume '{}' in storage pool '{}'", spec.volumeName(), spec.poolName());
@@ -230,13 +183,6 @@ class StorageOps {
     }
   }
 
-  /**
-   * The virtual size of an existing volume, in whole GiB, or empty when it cannot be read.
-   *
-   * <p>Only used to report a size that no longer matches the inventory. A missing answer therefore
-   * costs nothing but the note, which is why a failure is logged and swallowed instead of failing
-   * the run.
-   */
   OptionalLong capacityGiB(String path) {
     StorageVol vol = null;
     try {
@@ -250,18 +196,6 @@ class StorageOps {
     }
   }
 
-  /**
-   * Grows an existing volume to an absolute size, for a disk whose domain is shut down.
-   *
-   * <p>libvirt is told the final capacity in bytes rather than a delta, so a resize that is
-   * repeated — a retried run, a run that crashed after the resize and before the report — lands on
-   * the same number instead of adding to it. No allocation is requested: a sparse qcow2 grows in
-   * its own time, which is the behaviour a volume created by Mnemosyne already has.
-   *
-   * <p>The {@code SHRINK} flag is deliberately not passed, so libvirt itself refuses a size below
-   * the current one. The caller checks for that too; this is the backstop that does not depend on
-   * the caller being right.
-   */
   void growVolume(String path, long targetGiB) throws LibvirtException {
     StorageVol vol = connect.storageVolLookupByPath(path);
     try {
@@ -276,20 +210,6 @@ class StorageOps {
     }
   }
 
-  /**
-   * The pool, refreshed if libvirt lets it be.
-   *
-   * <p>The refresh is a cache warm-up and nothing more: it makes libvirt notice volumes that were
-   * put in the pool's directory behind its back, so that one of them is found and reused instead of
-   * being clobbered. Everything after it talks to the host either way, which is why a refresh that
-   * fails is logged and stepped over rather than costing the VM.
-   *
-   * <p>It has to be stepped over, too. libvirt refuses to refresh a pool that has an asynchronous
-   * job running, and cloning a base image is exactly such a job — so with several VMs being created
-   * at once in one pool, the ordinary case is one of them refreshing while another is still
-   * copying. Treating that as a failure would make a VM's fate depend on its neighbour's timing,
-   * which is the one thing per-VM isolation is for.
-   */
   private StoragePool lookupPool(String name) throws LibvirtException {
     StoragePool pool;
     try {

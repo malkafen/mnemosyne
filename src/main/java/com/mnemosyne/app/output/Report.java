@@ -25,7 +25,6 @@ public final class Report {
     lines.add(line(marker, name, detail));
   }
 
-  /** Continuation lines under the previous entry; not counted in the summary. */
   public void sub(List<String> items) {
     items.forEach(i -> lines.add(String.format("      %s", i)));
   }
@@ -35,20 +34,10 @@ public final class Report {
     lines.add(line(SKIP_MARKER, name, reason));
   }
 
-  /** How many entries this block gave up on; what the run's exit code is built from. */
   public int skipped() {
     return skipped;
   }
 
-  /**
-   * Folds another block into this one, as if its entries had been added here in the first place.
-   *
-   * <p>What it is for is a phase whose entries were applied side by side. Each one writes into a
-   * block of its own, because {@link #add} and {@link #sub} only mean anything next to each other
-   * and two VMs reporting into one list at once would interleave a disk line under the wrong entry.
-   * The blocks are folded back in the order the plan listed them, not the order the hosts happened
-   * to finish in, so the report reads the same however the work was scheduled.
-   */
   public void merge(Report other) {
     other.counts.forEach((verb, n) -> counts.merge(verb, n, Integer::sum));
     lines.addAll(other.lines);

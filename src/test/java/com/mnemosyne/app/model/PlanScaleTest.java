@@ -10,26 +10,11 @@ import java.util.stream.IntStream;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
-/**
- * The plan over a group far larger than any hand-written fixture: every managed domain must be
- * accounted for exactly once, and the same inputs must always produce the same plan.
- *
- * <p>The size is the point. {@link Plan} builds {@code toUpdate} and {@code notes} by mapping a
- * pure function over the managed domains, which is what lets that pipeline be switched to a
- * parallel stream later. Flip it, and this is the test that says whether it still holds: below a
- * few hundred elements a parallel stream usually runs on the calling thread and proves nothing,
- * while at this size it really does fork. Run against a version that records notes on the side
- * instead of returning them, it fails.
- */
 @DisplayName("Plan at scale")
 public class PlanScaleTest {
 
   private static final int DOMAINS = 2000;
 
-  /**
-   * Even-numbered VMs already have their data disk, odd ones still need it, and every third VM
-   * carries a disk the inventory knows nothing about.
-   */
   private static Plan build() {
     Map<String, Server> servers = new HashMap<>();
     List<DomainState> actual = new ArrayList<>(DOMAINS);
@@ -63,9 +48,7 @@ public class PlanScaleTest {
 
   @Test
   void everyDomainIsAccountedForExactlyOnce() {
-    // Arrange & Act
     Plan plan = build();
-    // Assert
     long expectedAttaches = IntStream.range(0, DOMAINS).filter(i -> i % 2 != 0).count();
     long expectedNotes = IntStream.range(0, DOMAINS).filter(i -> i % 3 == 0).count();
 
@@ -78,10 +61,7 @@ public class PlanScaleTest {
 
   @Test
   void theSameInputsAlwaysProduceTheSamePlan() {
-    // Nothing may be dropped, duplicated or reordered between runs.
-    // Arrange
     Plan first = build();
-    // Act & Assert
     for (int run = 0; run < 20; run++) {
       Plan again = build();
       assertThat(again.getToUpdate().keySet()).isEqualTo(first.getToUpdate().keySet());

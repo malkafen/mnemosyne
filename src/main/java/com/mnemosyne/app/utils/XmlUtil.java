@@ -32,7 +32,6 @@ public class XmlUtil {
   private static Document parse(String xml)
       throws ParserConfigurationException, SAXException, IOException {
     DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
-    // Harden against XXE: domain XML is trusted, but disabling DTDs is cheap and correct.
     factory.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true);
     factory.setAttribute(XMLConstants.ACCESS_EXTERNAL_DTD, "");
     factory.setAttribute(XMLConstants.ACCESS_EXTERNAL_SCHEMA, "");
@@ -64,18 +63,8 @@ public class XmlUtil {
 
   public static final String MNEM_NS = "https://mnemosyne.dev/schema/v1";
 
-  /**
-   * Memory in domain XML is always KiB — libvirt normalizes every {@code <memory>} element to KiB
-   * on define, so Mnemosyne writes KiB too and never has to trust the {@code unit} attribute it
-   * reads back. The inventory and {@link com.mnemosyne.app.model.Server} stay in MiB; this is the
-   * only place the two meet.
-   */
   public static final long KIB_PER_MIB = 1024L;
 
-  /**
-   * The XML-backed part of a domain's state. Power state and autostart are not in the XML; {@link
-   * DomainState#withRuntime(boolean, boolean)} fills them in from the domain handle.
-   */
   public static DomainState getShortState(String domainXml) {
 
     try {
@@ -91,11 +80,7 @@ public class XmlUtil {
             name, cpu, ram, null, null, null, disks(doc), false, false, List.of(), List.of(), null);
       }
 
-      // <mnem:disks> lists the volumes Mnemosyne created; only those go when the domain does.
       Set<String> owned = paths(meta, "disk");
-      // <mnem:reused-disks> lists the volumes it found in the pool and attached. A path on both
-      // lists is taken as reused: of the two mistakes, keeping a volume is the one that can be
-      // undone.
       Set<String> reused = paths(meta, "volume");
       owned.removeAll(reused);
       List<Disk> disks =
@@ -108,7 +93,6 @@ public class XmlUtil {
           cpu,
           ram,
           textNS(meta, MNEM_NS, "serverId"),
-          // textNS(meta, MNEM_NS, "specHash"),
           textNS(meta, MNEM_NS, "specVersion"),
           textNS(meta, MNEM_NS, "managedBy"),
           disks,
@@ -122,11 +106,6 @@ public class XmlUtil {
     }
   }
 
-  /**
-   * The {@code <mnem:init>} marker as the metadata holds it, or null when there is none. Nothing is
-   * validated here: an unknown state is the plan's to refuse, and it can only name it if it gets
-   * it.
-   */
   private static InitMarker init(Element meta) {
     NodeList nodes = meta.getElementsByTagNameNS(MNEM_NS, "init");
     if (nodes.getLength() == 0) return null;
@@ -135,12 +114,10 @@ public class XmlUtil {
         attr(e, "state"), attr(e, "token"), attr(e, "created"), attr(e, "finished"));
   }
 
-  /** An attribute's value, or null when it is absent — DOM itself answers with an empty string. */
   private static String attr(Element e, String name) {
     return e.hasAttribute(name) ? e.getAttribute(name) : null;
   }
 
-  /** The {@code path} attributes of every {@code <mnem:tag>} under the metadata element. */
   private static Set<String> paths(Element meta, String tag) {
     Set<String> paths = new LinkedHashSet<>();
     NodeList listed = meta.getElementsByTagNameNS(MNEM_NS, tag);
@@ -149,18 +126,10 @@ public class XmlUtil {
     return paths;
   }
 
-  /**
-   * The domain's persistent-config XML with its memory size replaced.
-   *
-   * <p>Both {@code <memory>} (the boot-time maximum) and {@code <currentMemory>} (the balloon
-   * target) are set, mirroring the pair of {@code setVcpusFlags} calls in {@code updateCpu}.
-   * Leaving {@code currentMemory} behind would boot the domain with the old balloon size.
-   */
   public static String withMemory(String domainXml, long ramMiB) {
     try {
       Document doc = parse(domainXml);
       setMemory(doc, "memory", ramMiB);
-      // libvirt always emits currentMemory, but a hand-edited domain may not carry it.
       if (doc.getElementsByTagName("currentMemory").getLength() > 0) {
         setMemory(doc, "currentMemory", ramMiB);
       }
@@ -170,10 +139,6 @@ public class XmlUtil {
     }
   }
 
-  /**
-   * Writes {@code ramMiB} into {@code tag} as KiB, rewriting the {@code unit} attribute so the
-   * value and its unit can never drift apart.
-   */
   public static void setMemory(Document doc, String tag, long ramMiB) {
     Element element = (Element) doc.getElementsByTagName(tag).item(0);
     if (element == null) {
@@ -183,7 +148,6 @@ public class XmlUtil {
     element.setTextContent(String.valueOf(ramMiB * KIB_PER_MIB));
   }
 
-  /** Serializes a DOM tree; {@code what} only names the subject in the failure message. */
   public static String serialize(Document doc, String what) {
     try {
       Transformer transformer = TransformerFactory.newInstance().newTransformer();
@@ -196,10 +160,6 @@ public class XmlUtil {
     }
   }
 
-  /**
-   * One element on its own, without the XML declaration: the shape libvirt's {@code
-   * attachDeviceFlags} expects for a single device.
-   */
   public static String serializeFragment(Element element, String what) {
     try {
       Transformer transformer = TransformerFactory.newInstance().newTransformer();
@@ -213,10 +173,6 @@ public class XmlUtil {
     }
   }
 
-  /**
-   * The {@code <target><path>} of a storage pool, or null for a pool that has none — every pool
-   * type that is not backed by a local directory, which cannot be reasoned about by file path.
-   */
   public static String poolTargetPath(String poolXml) {
     try {
       Document doc = parse(poolXml);
@@ -237,13 +193,6 @@ public class XmlUtil {
     }
   }
 
-  /**
-   * Every file-backed {@code <disk device='disk'>} of a domain, in document order.
-   *
-   * <p>A cdrom is skipped: it is not a disk Mnemosyne owns, and it must not consume a target letter
-   * reserved for one. A network-backed disk (rbd, iscsi) has no {@code @file} and is skipped too —
-   * it is still reported as a target in use, which is what keeps a hand-built domain safe.
-   */
   public static List<Disk> disks(Document doc) {
     List<Disk> found = new ArrayList<>();
     NodeList disks = doc.getElementsByTagName("disk");
@@ -265,11 +214,6 @@ public class XmlUtil {
     return found;
   }
 
-  /**
-   * Target device names of every {@code <disk>} in the document, cdroms and network-backed disks
-   * included. Attaching a disk means picking a name nothing else answers to, so this deliberately
-   * looks wider than {@link #disks(Document)}.
-   */
   public static Set<String> usedDiskTargets(String domainXml) {
     try {
       return usedDiskTargets(parse(domainXml));
@@ -278,7 +222,6 @@ public class XmlUtil {
     }
   }
 
-  /** As {@link #usedDiskTargets(String)}, for a document already in hand. */
   public static Set<String> usedDiskTargets(Document doc) {
     Set<String> used = new LinkedHashSet<>();
     NodeList disks = doc.getElementsByTagName("disk");
@@ -289,17 +232,12 @@ public class XmlUtil {
     return used;
   }
 
-  /** {@code <target dev='...'/>} of one disk element, or null when the template leaves it out. */
   private static String targetDev(Element disk) {
     Element target = (Element) disk.getElementsByTagName("target").item(0);
     if (target == null) return null;
     return clean(target.getAttribute("dev"));
   }
 
-  /**
-   * Text of a child element, scoped to {@code parent}. Scoping matters for {@code <serial>}: a
-   * document-wide lookup would find the {@code <serial type='pty'>} console device instead.
-   */
   private static String childText(Element parent, String tag) {
     NodeList nodes = parent.getElementsByTagName(tag);
     return nodes.getLength() == 0 ? null : clean(nodes.item(0).getTextContent());

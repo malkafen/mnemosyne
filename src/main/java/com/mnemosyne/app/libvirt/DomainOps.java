@@ -17,14 +17,12 @@ class DomainOps {
 
   private static final Logger log = LoggerFactory.getLogger(DomainOps.class);
 
-  /** How long a guest is given to shut down on its own before it is destroyed. */
   private static final long SHUTDOWN_TIMEOUT_MS = 60_000L;
 
   private static final long SHUTDOWN_POLL_MS = 2000L;
 
   private static final long BYTES_PER_GIB = 1024L * 1024 * 1024;
 
-  /** {@code VIR_DOMAIN_BLOCK_RESIZE_BYTES}: libvirt-java exposes no constant for it. */
   private static final int VIR_DOMAIN_BLOCK_RESIZE_BYTES = 1;
 
   private final Connect connect;
@@ -80,7 +78,6 @@ class DomainOps {
     }
   }
 
-  /** Boots an already defined domain. */
   void startDomain(String name) throws LibvirtException {
     Domain d = connect.domainLookupByName(name);
     try {
@@ -90,10 +87,6 @@ class DomainOps {
     }
   }
 
-  /**
-   * Asks the guest to shut down and waits for it; a guest that is still running after {@link
-   * #SHUTDOWN_TIMEOUT_MS} is destroyed, so the run always converges on the inventory.
-   */
   void shutdownDomain(String name) throws LibvirtException {
     Domain d = connect.domainLookupByName(name);
     try {
@@ -126,22 +119,6 @@ class DomainOps {
     }
   }
 
-  /**
-   * Attaches one disk to a domain that already exists, and says whether the guest can see it yet.
-   *
-   * <p>The persistent config is written first, in a call of its own. If the live attach then fails
-   * — no free PCIe slot, a QEMU too old to hot-plug a virtio disk, a guest that refuses the request
-   * — the disk is nonetheless in the domain's config and appears the next time the domain is
-   * started. The run converges either way, and the only difference the operator sees is a note
-   * saying so. {@code No more available PCI slots} is the usual reason: libvirt keeps only a small
-   * spare of hot-pluggable ports, so several disks at once rarely all fit.
-   *
-   * <p>"Started" means a power cycle of the domain. A reboot from inside the guest keeps the same
-   * QEMU process, and with it exactly the devices the domain was launched with.
-   *
-   * <p>The reverse order would be worse: a disk hot-plugged into a running guest and missing from
-   * the config disappears on the next reboot, after the guest has been told to use it.
-   */
   boolean attachDisk(String name, String diskXml, boolean live) throws LibvirtException {
     Domain d = connect.domainLookupByName(name);
     try {
@@ -155,7 +132,6 @@ class DomainOps {
         log.debug("Domain '{}': disk hot-plugged into the running guest", name);
         return true;
       } catch (LibvirtException e) {
-        // Not fatal, and deliberately not rethrown: the config already has the disk.
         log.debug("Domain '{}': hot-plug failed, the disk applies after restart", name, e);
         return false;
       }
@@ -167,13 +143,6 @@ class DomainOps {
     }
   }
 
-  /**
-   * Target device names in use on a domain right now.
-   *
-   * <p>Read from the live definition, not the stored one: a disk somebody hot-plugged is in the
-   * former and not the latter, and handing out a name it already answers to would attach the new
-   * disk over it.
-   */
   Set<String> usedDiskTargets(String name) throws LibvirtException {
     Domain d = connect.domainLookupByName(name);
     try {
@@ -183,19 +152,6 @@ class DomainOps {
     }
   }
 
-  /**
-   * Grows one disk of a running domain, through QEMU.
-   *
-   * <p>This is the whole point of doing it live: QEMU resizes the image and raises a
-   * capacity-change event on the virtio device, so the guest kernel sees the new size straight away
-   * and the disk does not have to wait for a power cycle. Nothing is written to the domain XML,
-   * which does not record a disk's size in the first place.
-   *
-   * <p>The size is passed in bytes, which libvirt only accepts with {@code
-   * VIR_DOMAIN_BLOCK_RESIZE_BYTES}. Without that flag the argument is read as KiB — the same number
-   * would grow the disk 1024-fold — and libvirt-java hands both straight to the C API without
-   * touching either, so the flag is not optional.
-   */
   void blockResize(String name, String target, long targetGiB) throws LibvirtException {
     Domain d = connect.domainLookupByName(name);
     try {
@@ -247,10 +203,6 @@ class DomainOps {
     }
   }
 
-  /**
-   * Whether a domain of this name is defined. Any answer but libvirt's "no such domain" is an
-   * error, not a no: the caller uses it to decide whether volumes are free to delete.
-   */
   boolean isDefined(String name) throws LibvirtException {
     Domain d;
     try {
@@ -310,9 +262,6 @@ class DomainOps {
     }
   }
 
-  /**
-   * Replaces the domain's {@code <mnem:mnemosyne>} element, in the live definition too if running.
-   */
   void writeMetadata(String name, String metadata) throws LibvirtException {
     Domain d = connect.domainLookupByName(name);
     try {
@@ -350,8 +299,6 @@ class DomainOps {
     Domain d = connect.domainLookupByName(name);
     try {
       log.debug("Domain '{}': setting memory to {} MiB (config only)", name, ramMiB);
-      // libvirt-java has no setMemoryFlags, so the persistent config is redefined instead.
-      // INACTIVE is the stored config, so a running domain keeps its live memory untouched.
       String patched = XmlUtil.withMemory(d.getXMLDesc(Domain.XMLFlags.INACTIVE), ramMiB);
       freeDomainQuietly(connect.domainDefineXML(patched));
       log.debug("Domain '{}': ram updated (applies after restart)", name);

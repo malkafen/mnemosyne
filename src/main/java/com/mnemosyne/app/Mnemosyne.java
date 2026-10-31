@@ -29,16 +29,8 @@ class Mnemosyne {
   private static final Logger log = LoggerFactory.getLogger(Mnemosyne.class);
   private static final long CONFIRM_DELAY_MS = 10000L;
 
-  /** Everything went as planned. */
   private static final int EXIT_OK = 0;
 
-  /**
-   * The run finished, but not everything in it did: a VM was skipped, or a guest never came back
-   * over cloud-init. Both leave the host short of the inventory, and both used to end in exit 0 —
-   * which made a run where no guest was configured at all indistinguishable, to anything automated,
-   * from a clean one. It shares the code of a fatal error on purpose: for a caller there are two
-   * answers, "the inventory is now on the host" and "it is not".
-   */
   private static final int EXIT_INCOMPLETE = 1;
 
   private Validator validator;
@@ -48,7 +40,6 @@ class Mnemosyne {
   public Mnemosyne() {}
 
   public static void main(String[] args) {
-    // Keep the user-facing report (stdout) readable regardless of the console's default charset.
     System.setOut(new PrintStream(System.out, true, StandardCharsets.UTF_8));
 
     Config config = new Config();
@@ -58,11 +49,10 @@ class Mnemosyne {
     try {
       cmd.parseArgs(args);
     } catch (ParameterException e) {
-      // A bad value nobody typed is otherwise reported as if it had been an argument.
       String variable = env.source(e.getArgSpec());
       cmd.getErr().println(e.getMessage() + (variable == null ? "" : " (from " + variable + ")"));
-      e.getCommandLine().usage(cmd.getErr()); // print usage
-      System.exit(cmd.getCommandSpec().exitCodeOnInvalidInput()); // = 2
+      e.getCommandLine().usage(cmd.getErr());
+      System.exit(cmd.getCommandSpec().exitCodeOnInvalidInput());
       return;
     }
 
@@ -92,7 +82,6 @@ class Mnemosyne {
       if (exitCode != EXIT_OK) System.exit(exitCode);
     } catch (Exception e) {
       Throwable root = getRootCause(e);
-      // A failure raised by Mnemosyne itself is its own root cause; repeating it reads as noise.
       if (root == e) log.error("Fatal: {}", e.getMessage());
       else log.error("Fatal: {} (cause: {})", e.getMessage(), root.getMessage());
       log.debug("Fatal error details", e);
@@ -122,7 +111,6 @@ class Mnemosyne {
         Plan plan =
             i.harmonia.plan(
                 i.mnemon().getServers(), config.isDeleteDisable(), config.isPurgeDisks());
-        // Adoption creates nothing, so there is nothing to check and nothing to audit for it.
         Preflight preflight = config.isJoin() ? new Preflight() : i.harmonia.preflight();
         plan.print(i.mnemon.getGroup(), config.isJoin(), preflight);
         if (!preflight.ok()) blocked.put(i.mnemon.getGroup(), preflight);
@@ -157,8 +145,6 @@ class Mnemosyne {
         log.error("cloud-init did not finish on all servers — see warnings above");
       }
 
-      // Settling happens whatever cloud-init did - a launch:false VM must not be left running
-      // against the inventory - and its own failures count towards the exit code below.
       if (irides.stream().anyMatch(i -> i.harmonia().hasPendingStop())) {
         Report.heading("Settled");
         for (Iris i : irides) i.harmonia().settle(config.getParallel());
@@ -169,19 +155,6 @@ class Mnemosyne {
     }
   }
 
-  /**
-   * The run's verdict, printed and returned as the exit code.
-   *
-   * <p>Per-VM failures do not stop a run — that is the contract, and it is the right one — but the
-   * operator's terminal is not the only thing reading the result. A scheduler, a CI job or the next
-   * step of a pipeline has nothing but the exit code, and "three of five VMs were created and none
-   * of them was ever configured" has to reach it. So the skipped entries of every group and the
-   * guests that never phoned home are summed up here, once, after everything else has had its say.
-   *
-   * <p>The line names both numbers, because they are different failures with different fixes: a
-   * skipped entry was refused by the host and is in the report above with its reason, while a guest
-   * that did not phone home exists, runs, and is simply not configured.
-   */
   private int outcome(boolean cloudInitOk, List<String> unjoined) {
     int skipped = irides.stream().mapToInt(i -> i.harmonia().failures()).sum();
     List<String> pending = CloudInitServer.unfinished();
@@ -215,33 +188,15 @@ class Mnemosyne {
     return EXIT_INCOMPLETE;
   }
 
-  /**
-   * Inventory VMs found with {@code <mnem:init state='pending'>}: created by an earlier run whose
-   * cloud-init never confirmed. They are left alone, but a run that has them has not put the
-   * inventory on the host, and its exit code says so — {@code --plan} included.
-   */
   private List<String> pendingInit() {
     return irides.stream().flatMap(i -> i.harmonia().pendingInit().stream()).sorted().toList();
   }
 
-  /**
-   * Inventory servers left out because an unmanaged domain holds their name. A {@code --join} run
-   * is the one that takes them over, so there they are not a shortfall.
-   */
   private List<String> unjoined(boolean isJoin) {
     if (isJoin) return List.of();
     return irides.stream().flatMap(i -> i.harmonia().unjoined().stream()).sorted().toList();
   }
 
-  /**
-   * Nothing is applied while any VM in the plan is blocked. Creation needs a storage pool, a base
-   * image, a network and the templates; without one of them the batch would fail somewhere in the
-   * middle, leaving half the inventory provisioned and the rest reported as skipped. A disk the
-   * inventory wants smaller than it is blocks for a different reason — it is not a missing
-   * prerequisite but an instruction that must not be carried out — and stops the run the same way.
-   * The reason is already printed against the VM, so what is left to say is that none of the plan
-   * was carried out.
-   */
   private void stop(int blockedGroups) {
     System.out.printf(
         "Nothing was applied: %d of %d group(s) cannot be applied as planned.%n",
@@ -249,15 +204,13 @@ class Mnemosyne {
     throw new IllegalStateException("preflight failed");
   }
 
-  /** Refuses a value out of range, naming the variable it came from when nobody typed it. */
   private static void invalid(CommandLine cmd, Config.EnvDefaults env, String option, String rule) {
     String variable = env.source(cmd.getCommandSpec().findOption(option));
     cmd.getErr()
         .println(option + " " + rule + (variable == null ? "" : " (from " + variable + ")"));
-    System.exit(cmd.getCommandSpec().exitCodeOnInvalidInput()); // = 2
+    System.exit(cmd.getCommandSpec().exitCodeOnInvalidInput());
   }
 
-  /** What each option ended up as and who decided it, so an override can be seen, not guessed. */
   private static void logSettings(CommandLine cmd, Config.EnvDefaults env) {
     for (OptionSpec o : cmd.getCommandSpec().options()) {
       if (o.usageHelp() || o.versionHelp()) continue;
@@ -284,8 +237,6 @@ class Mnemosyne {
 
   private List<Mnemon> loadAndValidate(Config config) throws Exception {
     List<Mnemon> loaded = Mnemon.loadMnemones(config);
-    // Deletion is scoped to the host, not the group: two groups on one host:port would each delete
-    // the other's VMs as absent from the inventory.
     Map<String, String> targets = new LinkedHashMap<>();
     for (Mnemon m : loaded) {
       validateMnemone(m);
@@ -348,5 +299,4 @@ class Mnemosyne {
     }
     return cause;
   }
-  // EndClass
 }

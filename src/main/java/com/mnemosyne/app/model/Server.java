@@ -36,11 +36,6 @@ public class Server {
   private static final String IPV4_CIDR_PATTERN =
       "^((25[0-5]|2[0-4]\\d|[01]?\\d\\d?)\\.){3}(25[0-5]|2[0-4]\\d|[01]?\\d\\d?)/(3[0-2]|[12]?\\d)$";
 
-  /**
-   * An RFC 1123 host name: dot-separated labels of 1-63 letters, digits and hyphens, none starting
-   * or ending with a hyphen, 253 characters at most. The name is the domain, the host name, the
-   * volume file and part of the seed URL at once, and this is what all four accept.
-   */
   static final String HOSTNAME_PATTERN =
       "^(?=.{1,253}$)[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?"
           + "(\\.[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*$";
@@ -52,7 +47,6 @@ public class Server {
   @Pattern(regexp = HOSTNAME_PATTERN, message = "Server name " + HOSTNAME_MESSAGE)
   private String name;
 
-  // The id is the name whenever `name` is left out, so it is held to the same rule.
   @NotBlank(message = "Server id is required")
   @Pattern(regexp = HOSTNAME_PATTERN, message = "Server id " + HOSTNAME_MESSAGE)
   private String id;
@@ -85,22 +79,10 @@ public class Server {
   @NotBlank(message = "Storage pool name is required")
   private String pool = "default";
 
-  /**
-   * Additional blank disks, attached after the root one in the order listed here. Optional: a
-   * server without the key gets exactly the disk it has always had.
-   *
-   * <p>The cap is far below the 25 target names a {@code vd} bus offers, on purpose: it leaves room
-   * for a disk or a cdrom somebody attached by hand without Mnemosyne running out of letters.
-   */
   @Valid
   @Size(max = 24, message = "At most 24 extra disks per server")
   private List<ExtraDisk> extraDisks = List.of();
 
-  /**
-   * Paths of the provisioned extra volumes, keyed by disk name. Filled in by the reconciler once
-   * the volumes exist, the way {@link #volPath} is for the root disk: the domain XML cannot be
-   * built before the disks it points at have a path on the host.
-   */
   private Map<String, String> extraVolPaths = new LinkedHashMap<>();
 
   private Templates templates;
@@ -113,39 +95,21 @@ public class Server {
 
   private String volPath = null;
 
-  /**
-   * Paths among {@link #volPath} and {@link #extraVolPaths} that were already in the pool when the
-   * reconciler asked for them. Recorded in {@code <mnem:reused-disks>} instead of {@code
-   * <mnem:disks>}, so they are never deleted with the VM.
-   */
   private Set<String> reusedVolPaths = new LinkedHashSet<>();
 
-  /**
-   * The {@code <mnem:init>} this VM is created with, set by the reconciler before anything is built
-   * from it. Its token goes into the seed URL, which is how the guest's phone_home proves it is
-   * this guest.
-   */
   private InitMarker init;
 
   @NotBlank(message = "Libvirt network name is required")
   private String network = "default";
 
-  /** Whether the VM should be running; reconciled on every run, not only at creation. */
   private boolean launch = true;
 
-  /** Libvirt autostart; {@code null} leaves whatever the domain already has. */
   private Boolean autostart;
 
-  /** An {@code extraDisks:} key present but empty deserializes to null; an absent list is fine. */
   public void setExtraDisks(List<ExtraDisk> extraDisks) {
     this.extraDisks = extraDisks == null ? List.of() : extraDisks;
   }
 
-  /**
-   * Two disks with one name would fight over the same volume file and the same {@code <serial>},
-   * and the second would silently win. Bean Validation cannot express it per field, so it is
-   * asserted across the list.
-   */
   @AssertTrue(message = "extraDisks names must be unique within a server")
   public boolean isExtraDiskNamesUnique() {
     List<String> names =
@@ -153,15 +117,10 @@ public class Server {
     return names.size() == Set.copyOf(names).size();
   }
 
-  /** Volume names the extra disks of this server occupy in their pools. */
   public List<String> extraVolNames() {
     return extraDisks.stream().map(d -> d.volName(getName())).toList();
   }
 
-  /**
-   * What the cloud-init server hands out for one VM. {@code token} is the path segment every
-   * request for it has to carry; it is never logged.
-   */
   public record Seed(
       String name, String token, String metaData, String userData, String networkConfig) {}
 
@@ -174,11 +133,6 @@ public class Server {
         buildNetworkConfigYaml());
   }
 
-  /**
-   * {@code <metaUrl>/<name>/<token>/}. The token keeps both the seed and phone_home to the guest
-   * the domain was built for: the SMBIOS serial that carries this URL is readable by root inside
-   * the guest and by whoever can already manage the domain on the host, and by nobody else.
-   */
   private String seedUrl() {
     String base = metaUrl.endsWith("/") ? metaUrl : metaUrl + "/";
     return base + getName() + "/" + requireInit().token() + "/";
@@ -199,10 +153,6 @@ public class Server {
     return (name == null || name.isBlank()) ? id : name;
   }
 
-  /**
-   * The disk image is named after the VM plus the extension of the format the volume template
-   * creates, so a file-backed pool holds `<vm>.qcow2` next to the base images it was cloned from.
-   */
   public String getVolName() {
     return getName() + ".qcow2";
   }
@@ -210,8 +160,6 @@ public class Server {
   public String getSpecHash() {
     return specHash(this.cpu, this.ram);
   }
-
-  // XML builders
 
   public String buildVolumeXml() {
     String tmpl = this.templates.getVolTmpl();
@@ -221,13 +169,6 @@ public class Server {
     return documentToString(doc);
   }
 
-  /**
-   * Volume XML for one extra disk, from the same template as the root disk.
-   *
-   * <p>The template needs nothing added for this: it already describes a sparse qcow2 of a given
-   * capacity. The difference is in how the volume is created, not in what it looks like — an extra
-   * disk is created empty instead of being cloned from the base image and resized.
-   */
   public String buildExtraVolumeXml(ExtraDisk disk) {
     String tmpl = this.templates.getVolTmpl();
     Document doc = loadXmlTemplate(tmpl);
@@ -236,11 +177,6 @@ public class Server {
     return documentToString(doc);
   }
 
-  /**
-   * The {@code <disk>} element for one extra disk, on its own, ready for libvirt's {@code
-   * attachDeviceFlags}. Used when the disk is added to a domain that already exists; at creation
-   * the same element goes straight into the domain XML.
-   */
   public String buildExtraDiskXml(ExtraDisk disk, String targetDev, String path) {
     Document doc = loadXmlTemplate(this.templates.getServerTmpl());
     Element element = extraDiskElement(doc, rootDisk(doc), disk, targetDev, path);
@@ -262,11 +198,6 @@ public class Server {
     return documentToString(doc);
   }
 
-  /**
-   * The whole {@code <mnem:mnemosyne>} element, for {@code setMetadata}, which replaces it rather
-   * than merging. {@code ownedPaths} are the volumes Mnemosyne created, {@code reusedPaths} the
-   * ones it found in the pool and attached: none of either for an adopted VM.
-   */
   public String buildMnemosyneMetadataXml(
       List<String> ownedPaths, List<String> reusedPaths, InitMarker init) {
     StringBuilder disks = new StringBuilder();
@@ -285,16 +216,6 @@ public class Server {
         getId(), disks, reused, init == null ? "" : init.toXml());
   }
 
-  /**
-   * Records the volumes this VM is created with next to {@code serverId}: the ones Mnemosyne
-   * created in {@code <mnem:disks>}, the ones it found in the pool in {@code <mnem:reused-disks>} —
-   * and its {@code <mnem:init>}, pending, so the domain never exists without one. Built here rather
-   * than taken from the template, so a customised template needs no new element.
-   *
-   * <p>A reused volume is a {@code <mnem:volume>}, not a {@code <mnem:disk>}, on purpose: a build
-   * from before this record looks up every {@code <mnem:disk>} in the metadata, and would take a
-   * reused volume for one of its own and delete it.
-   */
   private void appendMetadata(Document doc) {
     String ns = "https://mnemosyne.dev/schema/v1";
     Node meta = doc.getElementsByTagNameNS(ns, "serverId").item(0).getParentNode();
@@ -304,7 +225,6 @@ public class Server {
     meta.appendChild(initElement(doc, ns));
   }
 
-  /** {@code <mnem:init state='pending' ...>}, in the XML the domain is defined with. */
   private Element initElement(Document doc, String ns) {
     InitMarker marker = requireInit();
     Element element = doc.createElementNS(ns, "mnem:init");
@@ -325,7 +245,6 @@ public class Server {
     return list;
   }
 
-  /** The volumes this VM was created with that Mnemosyne made itself. */
   public List<String> ownedPaths() {
     List<String> paths = new java.util.ArrayList<>();
     if (this.volPath != null) paths.add(this.volPath);
@@ -343,23 +262,14 @@ public class Server {
     nodes.item(0).setTextContent(value);
   }
 
-  /**
-   * A template that cannot be filled in is a configuration error. Reporting it by name beats
-   * failing later with an NPE, or defining a domain whose disk source was silently left empty.
-   */
   private String missing(String tmpl, String what) {
     return "Template '" + tmpl + "' has no " + what + " to fill in for server '" + getName() + "'";
   }
-
-  // XML helpers
 
   private Document loadXmlTemplate(String path) {
     try {
       DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
       factory.setNamespaceAware(true);
-      // The reference templates are heavily commented. Neither the comments nor the blank lines
-      // they sit in belong in the XML handed to libvirt, which discards them anyway but echoes
-      // the whole document in trace logs.
       factory.setIgnoringComments(true);
       DocumentBuilder builder = factory.newDocumentBuilder();
       Document doc = builder.parse(new File(path));
@@ -370,10 +280,6 @@ public class Server {
     }
   }
 
-  /**
-   * Drops whitespace-only text nodes. Without this the serializer indents on top of the template's
-   * own formatting and the result grows a ragged left margin with every nesting level.
-   */
   private static void stripBlankText(Node node) {
     NodeList children = node.getChildNodes();
     for (int i = children.getLength() - 1; i >= 0; i--) {
@@ -415,7 +321,6 @@ public class Server {
     setSourceFile(rootDisk(doc), this.volPath);
   }
 
-  /** The template's root disk: the first {@code device='disk'}, so never the cdrom. */
   private Element rootDisk(Document doc) {
     NodeList disks = doc.getElementsByTagName("disk");
     for (int i = 0; i < disks.getLength(); i++) {
@@ -434,12 +339,6 @@ public class Server {
     source.setAttribute("file", path);
   }
 
-  /**
-   * Adds the extra disks to the domain being defined, in inventory order, next to the root disk.
-   *
-   * <p>Target names are taken after everything the template already uses, so a template carrying a
-   * cdrom or a second disk of its own cannot end up with two devices on one name.
-   */
   private void appendExtraDisks(Document doc) {
     if (this.extraDisks.isEmpty()) return;
 
@@ -483,20 +382,6 @@ public class Server {
     return target == null ? null : target.getAttribute("dev");
   }
 
-  /**
-   * One extra disk, built by cloning the template's root disk.
-   *
-   * <p>Cloning rather than generating is deliberate: whatever the operator tuned on the root disk —
-   * {@code bus}, {@code discard}, {@code cache}, {@code io} — is what a data disk on the same
-   * storage should have, and there is then one place in the template that decides it instead of two
-   * that can drift apart.
-   *
-   * <p>Four things are not inherited. {@code <boot>} would put a blank disk in the boot chain.
-   * {@code <address>} would collide with the root disk's, so libvirt assigns a free one. {@code
-   * <backingStore>} would point the new disk at the base image. Any {@code <serial>} on the root
-   * disk is replaced by the disk's name, which is what makes {@code /dev/disk/by-id/virtio-<name>}
-   * appear in the guest.
-   */
   private Element extraDiskElement(
       Document doc, Element prototype, ExtraDisk disk, String targetDev, String path) {
 
@@ -542,8 +427,6 @@ public class Server {
     source.setAttribute("network", this.network);
   }
 
-  // YAML builders
-
   private String buildMetaData() {
     try {
       Map<String, Object> yaml = loadYamlTemplate(this.templates.getMetaDataTmpl());
@@ -567,11 +450,6 @@ public class Server {
       yaml.put("fqdn", getName());
       yaml.put("phone_home", phoneHome);
 
-      /* Map<String, Object> network = (Map<String, Object>) yaml.get("network");
-      Map<String, Object> ethernets = (Map<String, Object>) network.get("ethernets");
-      Map<String, Object> enp1s0 = (Map<String, Object>) ethernets.get("enp1s0");
-      enp1s0.put("addresses", List.of(this.ip));
-      enp1s0.put("gateway4", this.gateway); */
       return "#cloud-config\n" + yamlMapper().writeValueAsString(yaml);
     } catch (IOException e) {
       throw new TemplateException("Failed to build user-data YAML for '" + getName() + "'", e);
@@ -617,8 +495,6 @@ public class Server {
     }
     return (Map<String, Object>) value;
   }
-
-  // YAML helpers
 
   private static ObjectMapper yamlMapper() {
     return new ObjectMapper(new YAMLFactory());

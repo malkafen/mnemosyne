@@ -17,15 +17,12 @@ public class MnemonTest {
 
   @Test
   void loadMnemones_returnsCorrectGroupsAndServers() throws IOException {
-    // Arrange
     Config config = mock(Config.class);
     String testFile = getClass().getClassLoader().getResource("test-servers.yml").getPath();
     when(config.getServersPath()).thenReturn(testFile);
 
-    // Act
     List<Mnemon> result = Mnemon.loadMnemones(config);
 
-    // Assert
     assertThat(result).hasSize(3);
     assertThat(result.get(0).getServers()).hasSize(2);
     assertThat(result.get(1).getServers()).hasSize(1);
@@ -34,16 +31,11 @@ public class MnemonTest {
 
   @Test
   void loadMnemones_extraDiskWithoutAPool_inheritsTheServersOwn() throws IOException {
-    // A VM's disks stay together unless one is deliberately moved, and the value is filled in at
-    // load time so validation and the plan both see one pool rather than a null to resolve later.
-    // Arrange
     Config config = mock(Config.class);
     String testFile = getClass().getClassLoader().getResource("test-servers.yml").getPath();
     when(config.getServersPath()).thenReturn(testFile);
-    // Act
     List<Mnemon> result = Mnemon.loadMnemones(config);
     Server s = result.get(0).getServers().get("core-db-test-a.example.lan");
-    // Assert
     assertThat(s.getExtraDisks())
         .extracting(ExtraDisk::getName, ExtraDisk::getSize, ExtraDisk::getPool)
         .containsExactly(tuple("data", 40, "default"), tuple("logs", 50, "fast-ssd"));
@@ -51,46 +43,32 @@ public class MnemonTest {
 
   @Test
   void loadMnemones_serversWithoutExtraDisks_getAnEmptyList() throws IOException {
-    // Absent means none, never null: every caller iterates the list unguarded.
-    // Arrange
     Config config = mock(Config.class);
     String testFile = getClass().getClassLoader().getResource("test-servers.yml").getPath();
     when(config.getServersPath()).thenReturn(testFile);
-    // Act
     List<Mnemon> result = Mnemon.loadMnemones(config);
-    // Assert
     assertThat(result.get(0).getServers().get("core-db-test-b.example.lan").getExtraDisks())
         .isEmpty();
   }
 
   @Test
   void loadMnemones_groupWithoutServers_getsAnEmptyMap() throws IOException {
-    // A group may hold no VMs: it still describes the connection, and the host is brought down to
-    // zero managed VMs. Whether `servers` is absent or written empty makes no difference, and
-    // neither leaves a null behind for the plan to trip over.
-    // Arrange
     Config config = mock(Config.class);
     String testFile =
         getClass().getClassLoader().getResource("test-servers-no-servers.yml").getPath();
     when(config.getServersPath()).thenReturn(testFile);
-    // Act
     List<Mnemon> result = Mnemon.loadMnemones(config);
-    // Assert
     assertThat(result).hasSize(2).allSatisfy(m -> assertThat(m.getServers()).isEmpty());
   }
 
   @Test
   void loadMnemones_groupWithoutAKey_takesTheDefaultOne() throws IOException {
-    // --key / MNEM_KEY fill in only what the inventory leaves out: a group's own key wins.
-    // Arrange
     Config config = mock(Config.class);
     String testFile =
         getClass().getClassLoader().getResource("test-servers-default-key.yml").getPath();
     when(config.getServersPath()).thenReturn(testFile);
     when(config.getKey()).thenReturn("/keys/default");
-    // Act
     List<Mnemon> result = Mnemon.loadMnemones(config);
-    // Assert
     assertThat(result)
         .extracting(Mnemon::getKey)
         .containsExactly("/own/id_ed25519", "/keys/default");

@@ -32,15 +32,6 @@ import org.libvirt.StorageVol;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
-/**
- * What one VM's failure is allowed to do to the rest of the run.
- *
- * <p>A template that cannot be filled in is raised as an unchecked exception from inside the
- * builders, several frames below the reconciler. Nothing about it is exotic — a copied template
- * with an element dropped is the ordinary way to get one — and the contract is that it costs the
- * operator that one VM: the entry is reported as skipped, every other entry is still applied, and
- * the report is printed either way.
- */
 @ExtendWith(MockitoExtension.class)
 @DisplayName("Harmonia, a VM that cannot be created")
 public class HarmoniaFailureTest {
@@ -72,10 +63,6 @@ public class HarmoniaFailureTest {
     return out.toString(StandardCharsets.UTF_8);
   }
 
-  /**
-   * Test fixtures from {@code src/test/resources}, independent of the user-editable {@code
-   * templates/}.
-   */
   private static Templates fixtures() {
     Templates t = new Templates();
     t.setServerTmpl(HarmoniaFailureTest.class.getResource("/server-template.xml").getPath());
@@ -86,11 +73,8 @@ public class HarmoniaFailureTest {
     return t;
   }
 
-  /** The same templates, with the domain's {@code <interface>} dropped from the copy. */
   private Templates withoutInterface() throws IOException {
     String xml = Files.readString(Path.of(fixtures().getServerTmpl()), StandardCharsets.UTF_8);
-    // Comments go first: the template documents the <interface> it fills in, and a comment
-    // half-eaten by the next replacement would make the file unparseable for the wrong reason.
     String stripped =
         xml.replaceAll("(?s)<!--.*?-->", "").replaceAll("(?s)<interface.*?</interface>", "");
     assertThat(stripped).doesNotContain("<interface");
@@ -119,7 +103,6 @@ public class HarmoniaFailureTest {
     return s;
   }
 
-  /** An empty host, with a pool that hands back a volume for every name asked of it. */
   private void host() throws LibvirtException {
     when(connect.listAllDomains(0)).thenReturn(new Domain[0]);
     lenient().when(connect.storagePoolLookupByName("default")).thenReturn(pool);
@@ -130,10 +113,6 @@ public class HarmoniaFailureTest {
 
   @Test
   void aTemplateThatCannotBeRenderedCostsItsOwnVmAndNothingElse() throws Exception {
-    // The broken entry sits between two valid ones, because the two halves of the bug were on
-    // opposite sides of it: the VMs created before it lost their report, and the ones after it
-    // were never created at all.
-    // Arrange
     host();
     Map<String, Server> servers = new LinkedHashMap<>();
     servers.put("qa-a", server("qa-a", fixtures()));
@@ -141,10 +120,8 @@ public class HarmoniaFailureTest {
     servers.put("qa-c", server("qa-c", fixtures()));
 
     Harmonia harmonia = new Harmonia("bm05", connect);
-    // Act
     harmonia.plan(servers, false);
     harmonia.reconcile(1);
-    // Assert
     verify(connect).domainDefineXML(contains("<name>qa-a</name>"));
     verify(connect).domainDefineXML(contains("<name>qa-c</name>"));
     verify(connect, never()).domainDefineXML(contains("<name>qa-b</name>"));
@@ -160,13 +137,10 @@ public class HarmoniaFailureTest {
 
   @Test
   void theReportIsPrintedEvenWhenEveryVmFails() throws Exception {
-    // Arrange
     host();
     Harmonia harmonia = new Harmonia("bm05", connect);
-    // Act
     harmonia.plan(Map.of("qa-b", server("qa-b", withoutInterface())), false);
     harmonia.reconcile(1);
-    // Assert
     assertThat(report()).contains("[ bm05 ]").contains("skipped: 1").contains("· qa-b");
   }
 }

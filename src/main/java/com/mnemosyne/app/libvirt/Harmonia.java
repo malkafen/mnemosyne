@@ -37,17 +37,6 @@ import org.libvirt.LibvirtException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-/**
- * One hypervisor's share of the run: the plan for it, the checks in front of it, and the calls that
- * apply it.
- *
- * <p>Within a phase the VMs may be applied several at a time — see {@link #phase} for what that is
- * allowed to touch. Everything a worker reaches from there is either its own ({@link Server}, its
- * own {@link Report} block) or built to be shared: {@link DomainOps}, {@link StorageOps} and {@link
- * NetworkOps} hold nothing but the connection, libvirt connections are safe to call from several
- * threads at once, and {@link CloudInitServer} keeps its seeds in concurrent maps because the
- * guests were always going to fetch them in parallel.
- */
 public class Harmonia implements AutoCloseable {
 
   private final DomainOps domainOps;
@@ -57,37 +46,16 @@ public class Harmonia implements AutoCloseable {
   private final String group;
   private Plan plan;
 
-  /**
-   * The domains as they were when the plan was built. Kept so preflight can tell whether a volume
-   * name Mnemosyne is about to use is already attached somewhere, without reading the host twice.
-   */
   private List<DomainState> actual = List.of();
 
-  /**
-   * The ids of the VMs booted only so cloud-init could configure them; shut down in {@link
-   * #settle}. Ids rather than servers, and a set rather than a list, because they are written by
-   * however many workers are creating VMs at once: the order they went in carries no meaning, and
-   * {@link #pendingStops()} reads them back in the plan's order instead.
-   */
   private final Set<String> toSettle = ConcurrentHashMap.newKeySet();
 
-  /**
-   * How many entries this group gave up on, across every block it printed. A per-VM failure keeps
-   * the run going, but it is still a failure, and {@code Mnemosyne} turns the total into the
-   * process' exit code so that a run nobody watched is not mistaken for a clean one.
-   *
-   * <p>Only ever touched by the thread that drives the group, after a phase has finished and its
-   * blocks have been folded in, so the count is one thread's arithmetic however many workers did
-   * the work.
-   */
   private int failures;
 
   private static final Logger log = LoggerFactory.getLogger(Harmonia.class);
 
-  /** How long a finished phase waits for its workers before it reads their report blocks. */
   private static final long WORKER_STOP_WAIT_S = 30L;
 
-  /** Numbers the phase workers, so a log line says which VM a thread was busy with. */
   private static final AtomicInteger workerCount = new AtomicInteger();
 
   public Harmonia(
@@ -96,7 +64,6 @@ public class Harmonia implements AutoCloseable {
     this(group, Hypervisor.connect(user, key, host, port, skipHostKeyCheck));
   }
 
-  /** Everything this class does goes through one connection; opening it is the only other step. */
   Harmonia(String group, Connect connect) {
     this.domainOps = new DomainOps(connect);
     this.storageOps = new StorageOps(connect);
@@ -123,19 +90,6 @@ public class Harmonia implements AutoCloseable {
     return this.plan;
   }
 
-  /**
-   * Fills in the size of every disk of every managed domain, before the plan is built.
-   *
-   * <p>A volume's capacity is the one disk fact the domain XML does not carry, and the plan needs
-   * it to tell a disk that matches the inventory from one that has to grow. It is attached to the
-   * snapshot here rather than looked up later so that {@link Plan} keeps deciding everything about
-   * a domain from one value, the way it does for vCPU, RAM, power and autostart — a second source
-   * of "what should change" is exactly what the plan's own comments warn against.
-   *
-   * <p>The price is one volume lookup per disk of a managed domain, per run. Unmanaged domains are
-   * skipped: they are never touched, so their sizes are nobody's business. A lookup that fails
-   * leaves the disk at {@link DomainState#CAPACITY_UNKNOWN}, and an unknown size is never acted on.
-   */
   private List<DomainState> withDiskCapacities(List<DomainState> domains) {
     List<DomainState> filled = new ArrayList<>(domains.size());
     for (DomainState d : domains) {
@@ -154,18 +108,6 @@ public class Harmonia implements AutoCloseable {
     return List.copyOf(filled);
   }
 
-  /**
-   * Checks what the plan needs from the host before anything is applied.
-   *
-   * <p>Nothing is cloned or defined for an adoption or a delete, so only the creations and the
-   * updates that add a disk are checked, and a group with neither costs no calls at all. Pools,
-   * images and networks are looked up once per distinct value, not once per VM.
-   *
-   * <p>A pool is looked up for its own sake even when a base image is checked in it, because the
-   * pool's directory is what the volume-ownership check compares paths against. That is one extra
-   * read-only lookup per pool, and it buys the one check that stands between a typo and two domains
-   * writing into the same disk image.
-   */
   public Preflight preflight() {
     Preflight preflight = new Preflight();
     if (this.plan == null) {
@@ -187,8 +129,6 @@ public class Harmonia implements AutoCloseable {
     List<Server> servers = new ArrayList<>(creating);
     attaching.forEach(u -> servers.add(u.server()));
 
-    // Grouped by the value first, so a pool, an image or a network shared by twenty VMs is looked
-    // up once and reported once, against all the servers that need it.
     Map<String, List<Server>> byPool = new LinkedHashMap<>();
     Map<String, List<Server>> byImage = new LinkedHashMap<>();
     Map<String, List<Server>> byNetwork = new LinkedHashMap<>();
@@ -216,7 +156,6 @@ public class Harmonia implements AutoCloseable {
 
     for (List<Server> needed : byImage.values()) {
       Server first = needed.get(0);
-      // A pool that is already reported as a problem cannot be searched for an image in it.
       if (poolPaths.containsKey(first.getPool()) || preflight.blockers(first.getId()).isEmpty()) {
         storageOps
             .checkBaseImage(first.getPool(), first.getVolLookup())
@@ -238,18 +177,6 @@ public class Harmonia implements AutoCloseable {
     return preflight;
   }
 
-  /**
-   * Turns every disk the inventory wants smaller into a preflight problem, which stops the run.
-   *
-   * <p>It goes through preflight rather than through a mechanism of its own because preflight is
-   * already what halts a run, and because the operator then reads one list of reasons instead of
-   * two. It is added before preflight's early return: a group with nothing to create and no disk to
-   * attach still has to stop if one of its disks is over size.
-   *
-   * <p>Costs nothing over the wire. The sizes were read when the snapshot was taken, and the
-   * comparison was done by the plan.
-   */
-  /** A managed VM whose initialization cannot be told stops the run; nothing is guessed. */
   private void refuseUnknownInit(Preflight preflight) {
     this.plan
         .getUnknownInit()
@@ -262,12 +189,10 @@ public class Harmonia implements AutoCloseable {
                     id));
   }
 
-  /** Inventory VMs whose initialization never finished; each one makes the run incomplete. */
   public List<String> pendingInit() {
     return this.plan == null ? List.of() : List.copyOf(this.plan.getPendingInit().keySet());
   }
 
-  /** Inventory servers whose name an unmanaged domain holds; each one makes the run incomplete. */
   public List<String> unjoined() {
     return this.plan == null ? List.of() : List.copyOf(this.plan.getToAdopt().keySet());
   }
@@ -310,7 +235,6 @@ public class Harmonia implements AutoCloseable {
   }
 
   private void joinOne(Server s, Report report) {
-    // An adopted VM's volumes were not created by Mnemosyne: none are recorded as its own.
     String metadata =
         s.buildMnemosyneMetadataXml(List.of(), List.of(), InitMarker.adopted(Instant.now()));
     if (domainOps.joinDomain(s.getName(), metadata)) report.add("join", "+", s.getId(), "");
@@ -320,30 +244,6 @@ public class Harmonia implements AutoCloseable {
     }
   }
 
-  /**
-   * Applies the plan to the host: everything to delete, then everything to update, then everything
-   * to create, and within each of those three up to {@code parallel} VMs at a time.
-   *
-   * <p>The order of the phases is the contract and does not bend for concurrency — a name freed by
-   * a delete has to be free before a create asks for it, and a disk added by an update has to be
-   * there before the guest is told to boot. So each phase is finished, and its results folded into
-   * the report, before the next one starts. Within a phase the entries are independent: the plan
-   * has already made every one of them about a different domain, and preflight has already refused
-   * the case where two of them want the same volume.
-   *
-   * <p>A failure belongs to the VM it happened on and to nothing else: every entry is attempted,
-   * the ones that fail are reported as skipped, and the run carries on. That holds whatever the
-   * failure is. libvirt refusing a call is the expected kind; a template that cannot be rendered is
-   * the other, and it arrives as an unchecked exception from deep inside the builders. Catching
-   * only {@link LibvirtException} let that second kind escape the loop and take the whole run with
-   * it — the VMs already created went unreported, their seeds were never served because the
-   * cloud-init server was stopped on the way out, and a guest that had booted without one could
-   * never be configured again, because the next run finds the domain healthy and starts an existing
-   * VM without a seed.
-   *
-   * <p>The report is printed from a {@code finally} block for the same reason: whatever stops the
-   * run, what was already applied to the host is what gets printed.
-   */
   public void reconcile(int parallel) {
     if (this.plan == null) {
       log.debug("[ {} ] nothing to reconcile (no plan)", group);
@@ -360,25 +260,6 @@ public class Harmonia implements AutoCloseable {
     }
   }
 
-  /**
-   * Runs one phase's entries, at most {@code parallel} of them at a time, and folds what each one
-   * reported into {@code report} in the order the plan listed them.
-   *
-   * <p>What a worker is allowed to touch is what makes this safe, and it is worth stating: its own
-   * entry, its own block of the report, and the hypervisor. Nothing else is shared but the
-   * connection and the three {@code *Ops} that wrap it, none of which keeps state between calls.
-   * The two pieces of the run that several entries do write to at once — the cloud-init seeds and
-   * the set of VMs owed a shutdown — are concurrent collections, and neither is read until the
-   * phase is over.
-   *
-   * <p>The report is not built as the work lands. Each entry writes into a block of its own and the
-   * blocks are folded back in the plan's order afterwards, so the same inventory prints the same
-   * report whether it ran one VM at a time or eight, and a disk line never turns up under somebody
-   * else's VM.
-   *
-   * <p>{@code parallel} of 1 keeps the phase on the calling thread, with no pool and no handoff:
-   * the sequential run stays exactly what it was.
-   */
   private <T> void phase(
       String what, Collection<T> entries, BiConsumer<T, Report> work, Report report, int parallel) {
     if (entries.isEmpty()) return;
@@ -409,20 +290,11 @@ public class Harmonia implements AutoCloseable {
       }
       await(running);
     } finally {
-      // Both in a finally, and in this order: whatever stopped the phase, the entries that did
-      // finish are on the host and belong in the report.
       stopWorkers(pool);
       blocks.forEach(report::merge);
     }
   }
 
-  /**
-   * Waits for every entry of a phase, including the ones queued behind a failure.
-   *
-   * <p>Draining all of them rather than giving up at the first is what keeps the contract: a VM
-   * whose neighbour blew up is still attempted, still reported, and — because its block is only
-   * read once its worker is gone — still reported correctly.
-   */
   private static void await(List<Future<?>> running) {
     RuntimeException failure = null;
     for (Future<?> f : running) {
@@ -432,8 +304,6 @@ public class Harmonia implements AutoCloseable {
         Thread.currentThread().interrupt();
         throw new IllegalStateException("interrupted while applying the plan", e);
       } catch (ExecutionException e) {
-        // Nothing ordinary arrives here: an entry catches its own failure and reports it as
-        // skipped. What does is a bug in this class, and it is raised once the phase is over.
         Throwable c = e.getCause();
         if (failure == null)
           failure = (c instanceof RuntimeException r) ? r : new IllegalStateException(c);
@@ -442,7 +312,6 @@ public class Harmonia implements AutoCloseable {
     if (failure != null) throw failure;
   }
 
-  /** Stops a phase's workers and waits for them, because their blocks are read straight after. */
   private static void stopWorkers(ExecutorService pool) {
     pool.shutdownNow();
     try {
@@ -456,13 +325,10 @@ public class Harmonia implements AutoCloseable {
 
   private static Thread worker(Runnable r) {
     Thread t = new Thread(r, "mnemosyne-apply-" + workerCount.incrementAndGet());
-    // Daemon for the same reason the cloud-init threads are: a worker that outlives the phase it
-    // was interrupted in must not be what keeps the process alive.
     t.setDaemon(true);
     return t;
   }
 
-  // Reconcile methods
   private void deleteOne(Map.Entry<String, List<String>> entry, Report report) {
     String name = entry.getKey();
     List<String> diskPaths = entry.getValue();
@@ -484,18 +350,12 @@ public class Harmonia implements AutoCloseable {
     Server s = u.server();
     String name = u.actual().name();
     try {
-      // Disks first, and always before the power state: a disk written into the persistent
-      // config before a shutdown or a start is already there when the guest comes up, so the
-      // same run does not have to both add it and restart for it. Growing comes after adding,
-      // for the same reason in reverse: a disk that was just created already has its final size,
-      // so there is never anything to grow among the ones this run added.
       List<String> diskLines = new ArrayList<>(attachDisks(u));
       diskLines.addAll(growDisks(u));
       if (u.cpuChanged()) domainOps.updateCpu(name, s.getCpu());
       if (u.ramChanged()) domainOps.updateRam(name, s.getRam());
       if (u.autostartChanged()) domainOps.updateAutostart(name, s.getAutostart());
       if (u.powerChanged()) {
-        // Every managed VM has been through cloud-init at creation, so a start needs no seed.
         if (s.isLaunch()) domainOps.startDomain(name);
         else domainOps.shutdownDomain(name);
       }
@@ -507,18 +367,6 @@ public class Harmonia implements AutoCloseable {
     }
   }
 
-  /**
-   * Adds the disks an existing VM is missing, and returns one line per disk for the report.
-   *
-   * <p>Target names are recomputed here rather than taken from the plan. The plan reads the stored
-   * config; a disk hot-plugged into the running guest since its last boot is only in the live
-   * definition, and reusing its name would attach the new disk on top of it.
-   *
-   * <p>There is no rollback. A volume created here whose attach then fails is left where it is: the
-   * next run sees the disk still missing from the domain, finds the volume, reuses it and attaches
-   * it. Deleting it to "clean up" is the one step that could destroy data somebody wanted, and
-   * retrying costs nothing.
-   */
   private List<String> attachDisks(Plan.Update u) throws LibvirtException {
     if (!u.disksChanged()) return List.of();
 
@@ -536,9 +384,6 @@ public class Harmonia implements AutoCloseable {
         TargetDev.prefix(u.actual().disks().isEmpty() ? null : u.actual().disks().get(0).target());
 
     List<String> lines = new ArrayList<>();
-    // The whole record is rewritten, so the volumes detached by hand are carried over: they are
-    // still Mnemosyne's, and dropping them would make them vanish from the plan. The reused list
-    // is carried over whole for the same reason.
     List<String> owned = new ArrayList<>(u.actual().ownedPaths());
     owned.addAll(u.actual().detachedOwned());
     List<String> reused = new ArrayList<>(u.actual().reusedPaths());
@@ -558,10 +403,6 @@ public class Harmonia implements AutoCloseable {
               VolumeSpec.blank(
                   disk.volName(s.getName()), disk.getPool(), s.buildExtraVolumeXml(disk)));
 
-      // Recorded before the attach: a failed attach is retried with this same volume next run,
-      // and a volume that was never recorded would be left behind when the VM is deleted. A volume
-      // already on either list keeps its place: the retry finds the volume this VM created last
-      // time, and that one is still its own.
       if (!owned.contains(volume.path()) && !reused.contains(volume.path())) {
         (volume.reused() ? reused : owned).add(volume.path());
         domainOps.writeMetadata(
@@ -577,24 +418,6 @@ public class Harmonia implements AutoCloseable {
     return lines;
   }
 
-  /**
-   * Grows the disks the inventory wants bigger, and returns one line per disk for the report.
-   *
-   * <p>Which call does the work depends on the domain's power state, and the hypervisor does all of
-   * it either way. A running domain is resized through QEMU, which grows the image and raises a
-   * capacity-change event on the virtio device, so the guest has the new size immediately. A
-   * shut-down domain has no QEMU to ask, so its volume is resized in the storage pool and the guest
-   * finds the new size when it next boots.
-   *
-   * <p>There is no rollback, and there can be none: a qcow2 that has grown cannot be put back
-   * without risking whatever was written in the meantime. It costs nothing, because both calls set
-   * an absolute size rather than a delta — a run that died between the resize and its report leaves
-   * a disk the next run simply finds already correct.
-   *
-   * <p>What happens inside the guest is deliberately not attempted. The partition table and the
-   * filesystem on it belong to whoever administers that server, and a run that grew them would be
-   * guessing at a layout it has never seen.
-   */
   private List<String> growDisks(Plan.Update u) throws LibvirtException {
     if (!u.growChanged()) return List.of();
 
@@ -608,8 +431,6 @@ public class Harmonia implements AutoCloseable {
       } else if (!live && g.path() != null) {
         storageOps.growVolume(g.path(), g.toGiB());
       } else {
-        // A running disk with no target device name, or a stopped one with no file behind it.
-        // Neither can be addressed, and neither is worth guessing about.
         lines.add(String.format("%s: no way to address this disk - not resized", g.label()));
         continue;
       }
@@ -626,50 +447,29 @@ public class Harmonia implements AutoCloseable {
     return lines;
   }
 
-  /**
-   * One report line per disk. Both notes it can carry matter to the operator: {@code reused} says
-   * the disk is not blank, and {@code afterRestart} says the guest cannot see it until the domain
-   * is stopped and started again.
-   */
   private static String diskLine(
       ExtraDisk disk, String target, Provisioned volume, boolean afterRestart) {
     StringBuilder sb = new StringBuilder();
-    // The size is already on the update line; what this adds is the target the disk really got,
-    // which may differ from the plan's guess, plus whatever the operator has to know about it.
     sb.append(String.format("%s %s in pool '%s'", target, disk.getName(), disk.getPool()));
     if (volume.reused()) sb.append(" (").append(REUSED_NOTE).append(")");
-    // "power cycle", not "restart": a device that only made it into the persistent config appears
-    // when the domain is stopped and started again. A reboot from inside the guest keeps the same
-    // QEMU process, and therefore the same devices it was launched with, so it changes nothing.
     if (afterRestart) sb.append(" (applies after power cycle)");
     return sb.toString();
   }
 
-  /**
-   * vCPU and RAM are written to the persistent config only. The note is dropped when the domain is
-   * shut down in the same pass, because the new values are then already in effect on its next boot.
-   */
   private static String restartNote(Plan.Update u) {
     boolean staysUp = u.actual().active() && u.server().isLaunch();
     return (u.cpuChanged() || u.ramChanged()) && staysUp ? ", applies after restart" : "";
   }
 
-  /**
-   * What the report says about a volume that was already in the pool. It is attached as it is, and
-   * recorded as reused rather than created, so deleting the VM leaves it behind.
-   */
   private static final String REUSED_NOTE =
       "reused existing volume - not created by mnemosyne, kept when the VM is deleted";
 
   private void createOne(Server s, Report report) {
-    // The volumes this attempt created, as opposed to found: the only ones a failure may take back.
     List<String> created = new ArrayList<>();
     try {
       VolumeSpec volSpec =
           new VolumeSpec(
               s.getVolName(), s.getPool(), s.buildVolumeXml(), s.getVolLookup(), s.getDisk());
-      // A fresh marker, with a fresh token, for every attempt: the domain is defined with it
-      // already pending, and the token is how its phone_home is told from anybody else's.
       s.setInit(InitMarker.pending(Instant.now()));
       Provisioned root = storageOps.provisionVolume(volSpec);
       s.setVolPath(root.path());
@@ -680,10 +480,7 @@ public class Harmonia implements AutoCloseable {
       } else {
         created.add(root.path());
       }
-      // Every disk must exist before the domain XML is built: the XML points at their paths.
       diskLines.addAll(createExtraVolumes(s, created));
-      // A new VM always boots once so cloud-init can configure it; launch:false is honoured
-      // afterwards, in settle().
       DomainSpec domainSpec =
           new DomainSpec(s.getName(), s.buildServerXml(), true, s.getAutostart());
       CloudInitServer.register(s.buildSeed(), () -> confirmInit(s));
@@ -693,23 +490,12 @@ public class Harmonia implements AutoCloseable {
       report.sub(diskLines);
     } catch (LibvirtException | RuntimeException e) {
       log.debug("[ {} ] create failed for '{}'", group, s.getId(), e);
-      // Whatever went wrong, this VM is not coming up in this run, and a seed left registered
-      // for it would hold waitForCloudInit for the full timeout and then report a VM that does
-      // not exist. Unregistering a name that was never registered costs nothing.
       CloudInitServer.unregister(s.getName());
       report.skip(s.getId(), "create failed: " + cause(e));
       report.sub(rollback(s.getName(), created));
     }
   }
 
-  /**
-   * Records that the guest phoned home: {@code <mnem:init state='finished'>}, written the moment it
-   * does rather than after the wait, so a run interrupted in between does not leave a configured VM
-   * marked pending. Called on a cloud-init server thread, possibly more than once for one guest.
-   *
-   * <p>The whole metadata element is rewritten from what the VM was created with in this run —
-   * nothing else changes it in the meantime, since a VM being created is not also being updated.
-   */
   private void confirmInit(Server s) throws LibvirtException {
     synchronized (s) {
       InitMarker finished = s.getInit().finish(Instant.now());
@@ -721,15 +507,6 @@ public class Harmonia implements AutoCloseable {
     }
   }
 
-  /**
-   * Deletes the volumes a failed creation made, and returns what the report says about them.
-   *
-   * <p>Only volumes this attempt created are touched; a reused one was never in {@code created}.
-   * Nothing is deleted while a domain of that name is defined, or when that cannot be told: the
-   * volumes may be under it. What is left is named, so the operator can decide — a run killed
-   * between creating a volume and defining the domain leaves the same kind of volume behind, and
-   * the next run can only find it and reuse it.
-   */
   private List<String> rollback(String name, List<String> created) {
     if (created.isEmpty()) return List.of();
     try {
@@ -746,16 +523,6 @@ public class Harmonia implements AutoCloseable {
         .toList();
   }
 
-  /**
-   * Creates the blank volumes of a new VM and hands their paths to the server, so {@code
-   * buildServerXml} can point the domain's disks at them. The paths of the volumes it actually
-   * created are added to {@code created}, one by one, so a failure halfway knows what it made.
-   *
-   * <p>A volume already in the pool under the expected name is reused and reported, never replaced,
-   * and recorded as reused. For the root disk that may be a retried creation; for a data disk it
-   * can be the previous life of a VM with the same name, which is exactly why Mnemosyne does not
-   * delete it to get a blank one — and does not take it for its own either.
-   */
   private List<String> createExtraVolumes(Server s, List<String> created) throws LibvirtException {
     if (s.getExtraDisks().isEmpty()) return List.of();
 
@@ -781,29 +548,17 @@ public class Harmonia implements AutoCloseable {
     return lines;
   }
 
-  /**
-   * Shuts down the VMs that were booted only to let cloud-init configure them. Runs after the
-   * phone_home wait, so the host still matches the inventory when the run ends — a cloud-init
-   * timeout does not keep a launch:false VM running.
-   */
   public void settle(int parallel) {
     Report report = new Report();
-    // Worth applying side by side more than anything else here: a guest that ignores the shutdown
-    // request is waited on for a full minute before it is destroyed, and done one after another
-    // that minute is paid once per VM.
     phase("stop", pendingStops(), this::settleOne, report, parallel);
     report.print(group);
     failures += report.skipped();
   }
 
   private void settleOne(Server s, Report report) {
-    // Read before the shutdown, because the answer is about the boot that is ending here.
     boolean initialized = CloudInitServer.initialized(s.getName());
     try {
       domainOps.shutdownDomain(s.getName());
-      // The VM is stopped either way - it must not stay up against the inventory - but the
-      // word for it is not the same. A guest that never phoned home was booted and nothing
-      // more, and "initialized" would be a lie in the one case where it matters.
       report.add("stop", "-", s.getId(), initialized ? "initialized" : "cloud-init did not finish");
     } catch (LibvirtException | RuntimeException e) {
       log.debug("[ {} ] shutdown failed for '{}'", group, s.getId(), e);
@@ -811,7 +566,6 @@ public class Harmonia implements AutoCloseable {
     }
   }
 
-  /** The VMs {@link #createOne} booted for cloud-init and owes a shutdown, in the plan's order. */
   private List<Server> pendingStops() {
     if (this.plan == null || toSettle.isEmpty()) return List.of();
     return plan.getToCreate().values().stream().filter(s -> toSettle.contains(s.getId())).toList();
@@ -821,7 +575,6 @@ public class Harmonia implements AutoCloseable {
     return !toSettle.isEmpty();
   }
 
-  /** The entries this group reported as skipped, over the whole run. */
   public int failures() {
     return failures;
   }

@@ -15,12 +15,9 @@ public class PlanTest {
   @Test
   void plan_buildsCorrectly() {
 
-    // Arrange
     Map<String, Server> servers = TestData.sampleServers();
     List<DomainState> actual = TestData.sampleDomainStates();
-    // Act
     Plan result = new Plan(actual, servers, false);
-    // Assert
     assertThat(result.getToCreate().keySet()).containsExactly("toCreate");
     assertThat(result.getToUpdate().keySet()).containsExactly("toUpdate");
     assertThat(result.getToAdopt().keySet()).containsExactly("toAdopt");
@@ -36,12 +33,9 @@ public class PlanTest {
   @Test
   void plan_buildsCorrectly_deleteDisable() {
 
-    // Arrange
     Map<String, Server> servers = TestData.sampleServers();
     List<DomainState> actual = TestData.sampleDomainStates();
-    // Act
     Plan result = new Plan(actual, servers, true);
-    // Assert
     assertThat(result.getToCreate().keySet()).containsExactly("toCreate");
     assertThat(result.getToUpdate().keySet()).containsExactly("toUpdate");
     assertThat(result.getToAdopt().keySet()).containsExactly("toAdopt");
@@ -53,13 +47,8 @@ public class PlanTest {
 
   @Test
   void plan_noServersAtAll_deletesEveryManagedDomain() {
-    // A group emptied down to zero VMs. Only what Mnemosyne manages goes: an unmanaged domain is
-    // still somebody else's, whether the inventory lists anything on that host or not.
-    // Arrange
     List<DomainState> actual = TestData.sampleDomainStates();
-    // Act
     Plan result = new Plan(actual, Map.of(), false);
-    // Assert
     assertThat(result.getToDelete().keySet()).containsExactly("toDelete-vm", "toUpdate");
     assertThat(result.getToCreate()).isEmpty();
     assertThat(result.getToUpdate()).isEmpty();
@@ -69,9 +58,7 @@ public class PlanTest {
 
   @Test
   void plan_noServersAtAll_withDeleteDisable_deletesNothing() {
-    // Act
     Plan result = new Plan(TestData.sampleDomainStates(), Map.of(), true);
-    // Assert
     assertThat(result.getToDelete()).isEmpty();
   }
 
@@ -94,12 +81,8 @@ public class PlanTest {
 
   @Test
   void plan_onlyRamDiffers_landsInToUpdate() {
-    // RAM drift used to be filtered out of the plan entirely.
-    // Arrange
     Map<String, Server> servers = Map.of("web-01", server(2, 4096));
-    // Act
     Plan result = new Plan(List.of(domain(2, 2048)), servers, false);
-    // Assert
     assertThat(result.getToUpdate().keySet()).containsExactly("web-01");
     assertThat(result.getToCreate()).isEmpty();
     assertThat(result.getToDelete()).isEmpty();
@@ -107,72 +90,51 @@ public class PlanTest {
 
   @Test
   void plan_nothingDiffers_staysOutOfToUpdate() {
-    // Arrange
     Map<String, Server> servers = Map.of("web-01", server(2, 2048));
-    // Act
     Plan result = new Plan(List.of(domain(2, 2048)), servers, false);
-    // Assert
     assertThat(result.getToUpdate()).isEmpty();
   }
 
   @Test
   void plan_runningDomainWithLaunchFalse_landsInToUpdate() {
-    // Arrange
     Server s = server(2, 2048);
     s.setLaunch(false);
-    // Act
     Plan result = new Plan(List.of(domain(2, 2048, true, false)), Map.of("web-01", s), false);
-    // Assert
     assertThat(result.getToUpdate().keySet()).containsExactly("web-01");
     assertThat(result.getToUpdate().get("web-01").diff()).isEqualTo("power on->off");
   }
 
   @Test
   void plan_shutOffDomainWithLaunchTrue_landsInToUpdate() {
-    // Arrange
     Map<String, Server> servers = Map.of("web-01", server(2, 2048));
-    // Act
     Plan result = new Plan(List.of(domain(2, 2048, false, false)), servers, false);
-    // Assert
     assertThat(result.getToUpdate().get("web-01").diff()).isEqualTo("power off->on");
   }
 
   @Test
   void plan_autostartUnset_staysOutOfToUpdate() {
-    // An absent autostart is not desired state, so the domain's own flag is left alone.
-    // Arrange
     Map<String, Server> servers = Map.of("web-01", server(2, 2048));
-    // Act
     Plan result = new Plan(List.of(domain(2, 2048, true, true)), servers, false);
-    // Assert
     assertThat(result.getToUpdate()).isEmpty();
   }
 
   @Test
   void plan_autostartDiffers_landsInToUpdate() {
-    // Arrange
     Server s = server(2, 2048);
     s.setAutostart(true);
-    // Act
     Plan result = new Plan(List.of(domain(2, 2048, true, false)), Map.of("web-01", s), false);
-    // Assert
     assertThat(result.getToUpdate().get("web-01").diff()).isEqualTo("autostart false->true");
   }
 
   @Test
   void update_diff_reportsRamAlone() {
-    // Act
     String diff = new Plan.Update(server(2, 4096), domain(2, 2048)).diff();
-    // Assert
     assertThat(diff).isEqualTo("ram 2048->4096");
   }
 
   @Test
   void update_diff_reportsCpuAndRamTogether() {
-    // One VM, one line: Harmonia reports the pair as a single update.
-    // Act
     String diff = new Plan.Update(server(4, 4096), domain(2, 2048)).diff();
-    // Assert
     assertThat(diff).isEqualTo("cpu 2->4, ram 2048->4096");
   }
 }

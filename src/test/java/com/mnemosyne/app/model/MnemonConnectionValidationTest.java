@@ -13,11 +13,6 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
-/**
- * {@code user} and {@code host} go into the libvirt URI as they are. Anything that could end the
- * authority part and start URI parameters of its own (libvirt runs {@code command=} locally) has to
- * be refused before a connection is attempted, {@code --plan} included.
- */
 @DisplayName("Group user and host validation")
 public class MnemonConnectionValidationTest {
 

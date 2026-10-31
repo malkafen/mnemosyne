@@ -7,12 +7,6 @@ import java.util.Map;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
-/**
- * Which disks the plan decides to grow, and which it refuses to touch.
- *
- * <p>Everything here is decided from the snapshot alone — that is the point of keeping {@link Plan}
- * a pure function — so none of it needs a hypervisor.
- */
 @DisplayName("Plan, disk sizes")
 public class PlanGrowTest {
 
@@ -37,10 +31,6 @@ public class PlanGrowTest {
     return s;
   }
 
-  /**
-   * Running, because the inventory's {@code launch} defaults to true and power is not the subject
-   * of these tests: a domain that was shut down would be drift on its own.
-   */
   private static DomainState domain(String id, String managedBy, DomainState.Disk... disks) {
     return new DomainState(id, 2, 2048, id, "1", managedBy, List.of(disks), true, false);
   }
@@ -59,13 +49,8 @@ public class PlanGrowTest {
 
   @Test
   void theRootDiskGrowsWhenTheInventoryAsksForMore() {
-    // The root disk has no serial and, on an adopted VM, no predictable volume name either, so it
-    // is matched by position — the first file-backed disk — and nothing else.
-    // Arrange
     Server s = server("web-01", 40);
-    // Act
     Plan plan = plan(managed("web-01", root("web-01", 25)), s);
-    // Assert
     Plan.Update u = plan.getToUpdate().get("web-01");
     assertThat(u).isNotNull();
     assertThat(u.growChanged()).isTrue();
@@ -84,16 +69,13 @@ public class PlanGrowTest {
 
   @Test
   void anExtraDiskGrowsWhenTheInventoryAsksForMore() {
-    // Arrange
     Server s = server("web-01", 25, disk("data", 50));
     DomainState d =
         managed(
             "web-01",
             root("web-01", 25),
             new DomainState.Disk("vdb", IMAGES + "web-01-data.qcow2", "data", 40));
-    // Act
     Plan plan = plan(d, s);
-    // Assert
     assertThat(plan.getToUpdate().get("web-01").toGrow())
         .singleElement()
         .satisfies(
@@ -106,34 +88,26 @@ public class PlanGrowTest {
 
   @Test
   void sizesThatAlreadyMatchAreNotAChange() {
-    // Arrange
     Server s = server("web-01", 25, disk("data", 40));
     DomainState d =
         managed(
             "web-01",
             root("web-01", 25),
             new DomainState.Disk("vdb", IMAGES + "web-01-data.qcow2", "data", 40));
-    // Act
     Plan plan = plan(d, s);
-    // Assert
     assertThat(plan.getToUpdate()).isEmpty();
     assertThat(plan.getShrinks()).isEmpty();
   }
 
   @Test
   void aDiskBiggerThanTheInventoryIsRecordedAsAShrink_andIsNotWork() {
-    // A shrink must not reach toUpdate: the caller applies everything in there, and this is the
-    // one piece of drift that is never applied.
-    // Arrange
     Server s = server("web-01", 25, disk("data", 40));
     DomainState d =
         managed(
             "web-01",
             root("web-01", 25),
             new DomainState.Disk("vdb", IMAGES + "web-01-data.qcow2", "data", 50));
-    // Act
     Plan plan = plan(d, s);
-    // Assert
     assertThat(plan.getToUpdate()).isEmpty();
     assertThat(plan.getShrinks().get("web-01"))
         .singleElement()
@@ -147,18 +121,13 @@ public class PlanGrowTest {
 
   @Test
   void aShrinkOnOneDiskDoesNotCancelAGrowOnAnother() {
-    // Both are reported. The run stops because of the shrink, but the plan still has to say what
-    // it would otherwise have done, or the operator cannot tell what fixing the inventory buys.
-    // Arrange
     Server s = server("web-01", 40, disk("data", 10));
     DomainState d =
         managed(
             "web-01",
             root("web-01", 25),
             new DomainState.Disk("vdb", IMAGES + "web-01-data.qcow2", "data", 20));
-    // Act
     Plan plan = plan(d, s);
-    // Assert
     assertThat(plan.getToUpdate().get("web-01").toGrow())
         .singleElement()
         .satisfies(g -> assertThat(g.label()).isEqualTo("root disk"));
@@ -169,26 +138,17 @@ public class PlanGrowTest {
 
   @Test
   void aDiskWhoseSizeCouldNotBeReadIsLeftAlone() {
-    // An unread capacity is not zero. Treating it as zero would make every such disk look
-    // undersized and hand it the inventory's figure, which nobody asked for.
-    // Arrange
     Server s = server("web-01", 40);
     DomainState d = managed("web-01", new DomainState.Disk("vda", IMAGES + "web-01.qcow2", null));
-    // Act
     Plan plan = plan(d, s);
-    // Assert
     assertThat(plan.getToUpdate()).isEmpty();
     assertThat(plan.getShrinks()).isEmpty();
   }
 
   @Test
   void aDiskTheInventoryListsButTheDomainDoesNotHaveIsAnAttach_notAGrow() {
-    // It will be created at the size the inventory asks for, so there is nothing to grow.
-    // Arrange
     Server s = server("web-01", 25, disk("data", 40));
-    // Act
     Plan plan = plan(managed("web-01", root("web-01", 25)), s);
-    // Assert
     Plan.Update u = plan.getToUpdate().get("web-01");
     assertThat(u.disksChanged()).isTrue();
     assertThat(u.growChanged()).isFalse();
@@ -196,9 +156,6 @@ public class PlanGrowTest {
 
   @Test
   void aRenamedVmIsMeasuredOnTheDiskItHas_notOnTheNameItWouldGetToday() {
-    // The volume is still called by the VM's old name. Matching on the serial is what keeps the
-    // disk recognisable, and therefore growable, after a rename.
-    // Arrange
     Server s = server("web-01", 25, disk("data", 50));
     s.setName("web-01-renamed");
     DomainState d =
@@ -206,9 +163,7 @@ public class PlanGrowTest {
             "web-01",
             root("web-01", 25),
             new DomainState.Disk("vdb", IMAGES + "web-01-data.qcow2", "data", 40));
-    // Act
     Plan plan = plan(d, s);
-    // Assert
     assertThat(plan.getToUpdate().get("web-01").toGrow())
         .singleElement()
         .satisfies(g -> assertThat(g.path()).isEqualTo(IMAGES + "web-01-data.qcow2"));
@@ -216,12 +171,9 @@ public class PlanGrowTest {
 
   @Test
   void anUnmanagedDomainIsNeverGrown() {
-    // Arrange
     Server s = server("web-01", 40);
     DomainState d = domain("web-01", null, root("web-01", 25));
-    // Act
     Plan plan = new Plan(List.of(d), Map.of("web-01", s), false);
-    // Assert
     assertThat(plan.getToUpdate()).isEmpty();
     assertThat(plan.getShrinks()).isEmpty();
     assertThat(plan.getUnmanaged()).containsExactly("web-01");
@@ -229,17 +181,13 @@ public class PlanGrowTest {
 
   @Test
   void aDiskTheInventoryDoesNotMentionIsNeverGrown() {
-    // Somebody else's disk. It is reported as a note, and its size is not our business.
-    // Arrange
     Server s = server("web-01", 25);
     DomainState d =
         managed(
             "web-01",
             root("web-01", 25),
             new DomainState.Disk("vdb", IMAGES + "scratch.qcow2", null, 5));
-    // Act
     Plan plan = plan(d, s);
-    // Assert
     assertThat(plan.getToUpdate()).isEmpty();
     assertThat(plan.getShrinks()).isEmpty();
     assertThat(plan.getNotes().get("web-01"))

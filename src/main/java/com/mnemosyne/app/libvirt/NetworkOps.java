@@ -17,11 +17,6 @@ class NetworkOps {
     this.connect = connect;
   }
 
-  /**
-   * Read-only check that a domain defined against this network could start. A name libvirt does not
-   * know is accepted by {@code domainDefineXML} and only fails when the domain boots, which is late
-   * enough for the disk to have been cloned already.
-   */
   Optional<Problem> checkNetwork(String name) {
     Network network;
     try {
